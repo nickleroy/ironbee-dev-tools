@@ -1,0 +1,439 @@
+#! /usr/bin/env python
+""" Test / insert C user agent match ruleset structures """
+import os
+import re
+import sys
+from optparse import OptionParser
+
+
+class UserAgentException( Exception ) : pass
+
+class FieldException( UserAgentException ) : pass
+class FieldRule( object ) :
+    _strings = {
+        "field"  : r'(NONE|PRODUCT|PLATFORM|EXTRA)',
+        "type"   : r'(TERMINATE|EXISTS|MATCHES|STARTSWITH|CONTAINS|ENDSWITH)',
+        "string" : r'"(.*)"',
+        "result" : r'(NO|YES)',
+        }
+    _regexs = None
+
+    @staticmethod
+    def ReString( which ) :
+        return FieldRule._strings[which]
+
+    @staticmethod
+    def Compile( ) :
+        FieldRule._regexs = { }
+        for name,string in FieldRule._strings.items( ) :
+            FieldRule._regexs[name] = re.compile(string)
+
+    def __init__( self, lineno, field, mtype, string, result ) :
+        if self._regexs is None :
+            self.Compile( )
+        self._lineno = lineno
+        self._field  = field
+        self._type   = mtype
+        self._string = string
+        self._result = result
+
+    def ValidateX( self, name, value ) :
+        if value is None :
+            s = "Line %d: No %s in field rule" % ( self._lineno, name ) 
+            raise FieldException( s )
+        elif not FieldRule._regexs[name].match(value) :
+            s = "Line %d: Invalid %s in field rule" % ( self._lineno, name ) 
+            raise FieldException( s )
+
+    def Validate( self ) :
+        linestr = "Line %d: " % (self._lineno)
+        self.ValidateX( "field",  self._field )
+        self.ValidateX( "type",   self._type )
+        self.ValidateX( "string", self._string )
+        self.ValidateX( "result", self._result )
+        return True
+
+    def __str__( self ) :
+        return '{ %s, %s, "%s", %s },' % \
+            ( self._field.upper(),
+              self._type.upper(),
+              self._string,
+              self._result.upper() )
+
+
+class Generator( object ) :
+    def __init__( self, indent, fp=None, lst=None ) :
+        assert fp is not None  or  lst is not None
+        self._indent = indent
+        self._fp = fp
+        self._list = lst
+
+    def _setIndent( self, i ) : self._indent = i
+    Indent = property( lambda self : self._indent, _setIndent )
+
+    def GenLine( self, spaces, text ) :
+        spaces += self._indent
+        s = " "*spaces+text if text != "" else ""
+        if self._list is not None :
+            self._list.append( s )
+        if self._fp is not None :
+            print >>self._fp, s
+        
+
+class MatchException( UserAgentException ) : pass
+class MatchRule( object ) :
+    _MaxFieldRules = 8
+    def __init__( self, rule_set, line_num, name ) :
+        self._rule_set    = rule_set
+        self._name        = name
+        self._line_num    = line_num
+        self._category    = None
+        self._field_rules = [ ]
+    def Name( self ) :
+        return self._name
+    def Path( self ) :
+        return self._path
+    def LineNum( self ) :
+        return self._line_num
+    def SetCategory( self, category ) :
+        self._category = category
+    def Category( self ) :
+        return self._category
+    def AddFieldRule( self, field_rule ) :
+        self._field_rules.append( field_rule )
+    def Validate( self, lineno ) :
+        if self._category is None  or  len(self._category) == 0 :
+            raise MatchException(
+                "Line %d: No category in match rule"%(lineno) )
+        if len(self._field_rules) >= MatchRule._MaxFieldRules :
+            raise MatchException(
+                "Line %d: too many field rules in match rule"%(lineno) )
+        if len(self._field_rules) == 0 :
+            raise MatchException(
+                "Line %d: No field rules"%(lineno) )
+        return True
+
+    def Generate( self, gen ) :
+        gen.GenLine( 0, '{' )
+        gen.GenLine( 4, '/* %s line %d */' % \
+                         (self._rule_set.FileName,self._line_num) )
+        gen.GenLine( 4, '"%s",'%(self._name) )
+        gen.GenLine( 4, '"%s",'%(self._category) )
+        gen.GenLine( 4, '{' )
+        for field_rule in self._field_rules :
+            gen.GenLine( 8, str(field_rule) )
+        gen.GenLine( 4, '},' )
+        gen.GenLine( 0, '},' )
+
+
+class MatchSetException( UserAgentException ) : pass
+class MatchRuleSet( object ) :
+    def __init__( self, path ) :
+        self._path        = path
+        self._file_name   = os.path.basename(path)
+        self._name        = None
+        self._match_rules = [ ]
+        self._cur_rule    = None
+        self._rule_names  = { }
+
+    def SetName( self, lineno, name ) :
+        if self._name is not None :
+            raise MatchSetException(
+                "Line %d: Name already set to %s"%(lineno, self._name) )
+        self._name = name
+
+    Name = property( lambda self : self._name )
+    Path = property( lambda self : self._path )
+    FileName = property( lambda self : self._file_name )
+
+    def Rules( self ) :
+        for rule in self._match_rules :
+            yield rule
+        return
+
+    def AddMatchRule( self, lineno, rule ) :
+        if self._name is None :
+            raise MatchSetException( "Line %d: name not set" % (lineno) )
+
+        if self._cur_rule is not None :
+            raise MatchSetException(
+                "Line %d: Attempt to create rule %s inside rule %s" % \
+                    (lineno, rule.Name(), self._cur_rule.Name()) )
+        self._cur_rule = rule
+        name = rule.Name()
+        if name in self._rule_names :
+            raise MatchSetException(
+                "Line %d: Duplicate name '%s' as rule define on line %d"%\
+                    (lineno, name, self._rule_names[name].LineNum()) )
+
+
+    def AddItem( self, lineno, what, rematch ) :
+        if self._cur_rule is None :
+            raise MatchException( what+" line outside of rule!" )
+
+        elif what == "cat" :
+            self._cur_rule.SetCategory( rematch.group(1) )
+
+        elif what == "field-rule" :
+            field_rule = FieldRule( lineno,
+                                    rematch.group(1), rematch.group(2),
+                                    rematch.group(3), rematch.group(4) )
+            self._cur_rule.AddFieldRule( field_rule )
+
+        else :
+            raise MatchSetException(
+                "Line %d: Unhandled item '%s'"%(lineno, what) )
+
+    def EndRule( self, lineno ) :
+        field_rule = FieldRule( lineno, "NONE", "TERMINATE", "NULL", "NO" )
+        self._cur_rule.AddFieldRule( field_rule )
+        self._cur_rule.Validate( lineno )
+        self._match_rules.append( self._cur_rule )
+        self._rule_names[self._cur_rule.Name()] = self._cur_rule
+        self._cur_rule = None
+
+    def Generate( self, gen ) :
+        gen.GenLine( 0, '' )
+        gen.GenLine( 0, '/* %s from "%s" */'%(self._name, self._path) )
+        for rule in self._match_rules :
+            rule.Generate( gen )
+
+
+class RuleFileException( UserAgentException ) : pass
+class RuleFileParser( object ) :
+    _strings = {
+        "name"       : r'name\s+(.+)$',
+        "rule"       : r'rule\s+(\w+)$',
+        "cat"        : r'category\s+(.+)$',
+        "field-rule" : None,
+        "rule-end"   : r'rule-end$',
+        }
+    _regexs = None
+
+    @staticmethod
+    def Compile( ) :
+        RuleFileParser._regexs = { }
+        for name,string in RuleFileParser._strings.items( ) :
+            if name == "field-rule" :
+                string = r'field-rule\s+'+ \
+                    FieldRule.ReString("field")+'\s+'+ \
+                    FieldRule.ReString("type")+'\s+'+ \
+                    FieldRule.ReString("string")+'\s+'+ \
+                    FieldRule.ReString("result")+'$'
+            RuleFileParser._regexs[name] = re.compile( string, re.IGNORECASE )
+
+    def __init__( self ) :
+        if self._regexs is None :
+            self.Compile( )
+
+    def ParseRuleFile(self, path, fp) :
+        rule_set = MatchRuleSet( path )
+
+        for lnum,line in enumerate(fp) :
+            line = line.strip( )
+            if len(line) == 0 :
+                continue
+            if line.startswith( "#" ) :
+                continue
+            
+            # Try to match the line
+            match = None
+            what = None
+            for name,regex in self._regexs.items( ) :
+                m = regex.match( line )
+                if m is not None :
+                    match = m
+                    what  = name
+                    break
+            if m is None :
+                raise RuleFileException(
+                    "Line %d: Failed to parse '%s'"%(lnum+1, line) )
+
+            if what == "name" :
+                rule_set.SetName( lnum+1, m.group(1) )
+            elif what == "rule" :
+                rule = MatchRule( rule_set, lnum+1, m.group(1) )
+                rule_set.AddMatchRule( lnum+1, rule )
+            elif what == "rule-end" :
+                rule_set.EndRule( lnum+1 )
+            else :
+                rule_set.AddItem( lnum+1, what, m )
+        return rule_set
+
+
+class CFileException( Exception ) : pass
+class CFile( object ) :
+    
+    """ Manage the C source file """
+    def __init__( self, path ):
+        self._path = path
+        self._lines = None
+        self._patched = None
+        self._start_line = None
+        self._end_line = None
+
+    def Read( self ) :
+        self._lines = []
+        try :
+            fp = open( self._path, "r" )
+            for num,line in enumerate(fp) :
+                self._lines.append( line.rstrip() )
+                if '** Start Match Ruleset **' in line :
+                    if self._start_line is not None :
+                        raise CFileException(
+                            "Duplicate start line in C file %s (%d and %d)" % \
+                                (self._start_line, num, self._path) )
+                    self._start_line = num
+                elif '** End Match Ruleset **' in line :
+                    if self._end_line is not None :
+                        raise CFileException(
+                            "Duplicate end line in C file %s (%d and %d)" % \
+                                (self._end_line, num, self._path) )
+                    self._end_line = num
+            if self._start_line is None :
+                raise CFileException(
+                    "No start line in C file %s" % (self._path) )
+            if self._end_line is None :
+                raise CFileException(
+                    "No end line in C file %s" % (self._path) )
+            fp.close( )
+        except IOError as e :
+            raise CFileException(
+                "Error reading C file '%s': %s" % (path, str(e)) )
+
+    def Patch( self, lines ) :
+        self._patched = [ ]
+        self._patched += self._lines[:self._start_line+1]
+        self._patched += lines
+        self._patched += self._lines[self._end_line:]
+
+    def Write( self ) :
+        try :
+            fp = open( self._path, "w" )
+            for line in self._patched :
+                print >>fp, line
+            fp.close()
+        except IOError as e :
+            raise CFileException(
+                "Error writing C file '%s': %s" % (self._path, str(e)) )
+        
+
+class Main( object ) :
+    def __init__( self ) :
+        self._parser = OptionParser(
+            usage="usage: %prog [options]",
+            version="%prog 0.1.2" )
+        self._rule_sets = []
+
+    def SetupParser( self ) :
+        self._parser.set_defaults( cfile = None )
+        self._parser.add_option( "-f", "--file",
+                                 action="store", dest="cfile", type="string",
+                                 help="Specify the C source file" )
+
+        self._parser.set_defaults( generate = False )
+        self._parser.add_option( "-g", "--generate",
+                                 action="store_true", dest="generate",
+                                 help="Enable generation <default>" )
+
+        self._parser.set_defaults( execute = True )
+        self._parser.add_option( "--execute",
+                                 action="store_true", dest="execute",
+                                 help="Enable execution <default>" )
+        self._parser.add_option( "-n", "--no-execute",
+                                 action="store_false", dest="execute",
+                                 help="Disable execution (for test/debug)" )
+        self._parser.set_defaults( verbose = 0 )
+        self._parser.add_option( "-v", "--verbose",
+                                 action="count", dest="verbose",
+                                 help="Increment verbosity level" )
+        self._parser.set_defaults( quiet=False )
+        self._parser.add_option( "-q", "--quiet",
+                                 action="store_true", dest="quiet",
+                                 help="be vewwy quiet (I'm hunting wabbits)" )
+
+    def ParseCmdLine( self ) :
+        self._options, args = self._parser.parse_args()
+        if len(args) == 0 :
+            self._parser.error( "no files" )
+        self._rule_files = args
+
+    def Init( self ) :
+        self.SetupParser( )
+        self.ParseCmdLine( )
+
+    def Die( self, string ) :
+        print >>sys.stderr, string
+        sys.exit(1)
+
+    def Main( self ) :
+        self.ParseFiles( )
+        self.Validate( )
+        if self._options.generate :
+            self.Generate( sys.stdout )
+        if self._options.cfile is not None :
+            self.PatchCFile( )
+
+    def ParseFiles( self ) :
+        try :
+            parser = RuleFileParser()
+            for path in self._rule_files :
+                fp = open( path, "r" )
+                if not self._options.quiet : 
+                    print "Parsing file", path, ":"
+                rule_set = parser.ParseRuleFile( path, fp )
+                fp.close( )
+                self._rule_sets.append( rule_set )
+        except UserAgentException as e :
+            self.Die( str(e) )
+
+    def Validate( self ) :
+        all = { }
+        for rule_set in self._rule_sets :
+            for rule in rule_set.Rules( ) :
+                name = rule.Name( )
+                if name not in all :
+                    all[name] = rule
+                    continue
+                dup = all[name]
+                self.Die( "Duplicate name '%s': %s:%d and %s:%d" %\
+                              (name, rule.Path(), rule.LineNum(),
+                               dup.Path(), dup.LineNum()) )
+        pass
+
+    def Generate( self, fp=None, lst=None ) :
+        gen = Generator( 4, fp=fp, lst=lst )
+        gen.GenLine( 0, '' )
+        gen.GenLine( 0, '/*' )
+        gen.GenLine( 0, ' * Begin Auto Generated Block' )
+        gen.GenLine( 0, ' */' )
+        for rule_set in self._rule_sets :
+            rule_set.Generate( gen )
+        gen.GenLine( 0, '/*' )
+        gen.GenLine( 0, ' * End Auto Generated Block' )
+        gen.GenLine( 0, ' */' )
+        gen.GenLine( 0, '' )
+
+    def PatchCFile( self ) :
+        lines = []
+        self.Generate( lst=lines )
+        cfile = CFile( self._options.cfile )
+        try :
+            cfile.Read( )
+            cfile.Patch( lines )
+            if self._options.execute :
+                cfile.Write( )
+        except CFileException as e :
+            self.Die( str(e) )
+
+main = Main( )
+main.Init( )
+main.Main( )
+
+
+### Local Variables: ***
+### py-indent-offset:4 ***
+### python-indent:4 ***
+### python-continuation-offset:4 ***
+### tab-width:4  ***
+### End: ***
