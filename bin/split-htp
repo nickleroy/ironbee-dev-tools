@@ -1,0 +1,183 @@
+#! /usr/bin/env python
+###########################################################################
+##
+## Copyright(c) 2010 by Nick LeRoy, 310 Jones Ave, Fort Atkinson, WI
+##
+## This program is free software: you can redistribute it and/or modify
+## it under the terms of the GNU General Public License as published by
+## the Free Software Foundation, either version 3 of the License, or
+## (at your option) any later version.
+## 
+## This program is distributed in the hope that it will be useful,
+## but WITHOUT ANY WARRANTY; without even the implied warranty of
+## MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+## GNU General Public License for more details.
+## 
+## You should have received a copy of the GNU General Public License
+## along with this program.  If not, see <http://www.gnu.org/licenses/>.
+##
+###########################################################################
+import re
+import os
+import sys
+import subprocess
+from optparse import OptionParser
+
+class OpenError( Exception ) : pass
+class Splitter( object ) :
+    _get_re  = re.compile(r'^GET .*HTTP/\d\.\d\s*$')
+    _http_re = re.compile(r'^(.*)(HTTP/\d\.\d \d+ OK\s*)$')
+
+    @staticmethod
+    def Create( path, opts, fmt ) :
+        try :
+            fp = open( path, "r" )
+        except IOError as e :
+            print >>sys.stderr, "Failed to open file", path, ":", e
+            return None
+        mode = opts.mode
+        if mode == Main.MODE_AUTO :
+            line = fp.readline( )
+            if Splitter._get_re.match( line ) :
+                mode = Main.MODE_REQUEST
+            elif Splitter._http_re.match( line ) :
+                mode = Main.MODE_RESPONSE
+            else :
+                print >>sys.stderr, "No mode specified, auto failed"
+                return None
+        fp.seek( 0, 0 )
+        if mode == Main.MODE_REQUEST :
+            return ReqSplitter( fp, opts, mode, fmt, Splitter._get_re )
+        else :
+            return RespSplitter( fp, opts, mode, fmt, Splitter._http_re )
+
+    def __init__( self, fp, opts, mode, fmt, _re ) :
+        self._fp = fp
+        self._opts = opts
+        self._mode = mode
+        self._re = None
+        self._out = None
+        self._num = 0
+        self._fmt = fmt
+        self._re = _re
+
+    def ReadFile( self ) :
+        for line in self._fp :
+            self.ProcessLine( line )
+
+    def CloseFile( self, text ) :
+        if text is not None and len(text) :
+            assert self._out is not None
+            self._out.write( text )
+        if self._out is not None :
+            self._out.close( )
+            self._out = None
+
+    def OpenFile( self ) :
+        path = self._fmt % ( self._num )
+        self._num += 1
+        try :
+            self._out = open( path, "w" )
+            if not self._opts.quiet :
+                print "Writing to", path
+        except IOError as e :
+            raise OpenError(str(e))
+
+
+class ReqSplitter( Splitter ) :
+    def ProcessLine( self, line ) :
+        m = self._re.search( line )
+        if m is not None :
+            self.CloseFile( None )
+            self.OpenFile( )
+            self._out.write( line )
+        else :
+            assert self._out is not None
+            self._out.write( line )
+
+class RespSplitter( Splitter ) :
+    def ProcessLine( self, line ) :
+        m = self._re.search( line )
+        if m is not None :
+            self.CloseFile( m.group(1) )
+            self.OpenFile( )
+            self._out.write( m.group(2) )
+        else :
+            assert self._out is not None
+            self._out.write( line )
+
+
+class Main( object ) :
+    def __init__( self ) :
+        self._parser = OptionParser(
+            usage="usage: %prog [options] <infile> [<format>]",
+            version="%prog 0.1" )
+
+    MODE_AUTO     = 0
+    MODE_REQUEST  = 1
+    MODE_RESPONSE = 2
+    def Setup( self ) :
+
+        self._parser.set_defaults( mode = self.MODE_AUTO )
+        self._parser.add_option( "--req", "--request",
+                                 action="store_const",
+                                 dest="mode", const=self.MODE_REQUEST,
+                                 help="Request mode <default=auto>" )
+        self._parser.add_option( "--resp", "--response",
+                                 action="store_const",
+                                 dest="mode", const=self.MODE_RESPONSE,
+                                 help="Response mode <default=auto>" )
+
+        self._parser.set_defaults( execute = True )
+        self._parser.add_option( "--execute",
+                                 action="store_true", dest="execute",
+                                 help="Enable execution <default>" )
+        self._parser.add_option( "-n", "--no-execute",
+                                 action="store_false", dest="execute",
+                                 help="Disable execution (for test/debug)" )
+        self._parser.set_defaults( verbose = 0 )
+        self._parser.add_option( "-v", "--verbose",
+                                 action="count", dest="verbose",
+                                 help="Increment verbosity level" )
+        self._parser.set_defaults( quiet=False )
+        self._parser.add_option( "-q", "--quiet",
+                                 action="store_true", dest="quiet",
+                                 help="be vewwy quiet (I'm hunting wabbits)" )
+
+    def Parse( self ) :
+        (self._options, args) = self._parser.parse_args()
+        if len(args) < 1 :
+            self._parser.error( "no file specified" )
+        self._path = args.pop(0)
+        if len(args) :
+            self._format = args.pop(0)
+        else :
+            s, e = self._path.rsplit( '.', 1 )
+            self._format = s+'-%04d'+'.'+e
+            if not self._options.quiet :
+                print "Auto format: '%s'" % (self._format)
+        if len(args) :
+            self._parser.error( "Unknown argument '%s'" % (args[0]) )
+
+    def SplitFile( self ) :
+        splitter = Splitter.Create( self._path,
+                                    self._options,
+                                    self._format )
+        assert splitter is not None
+        splitter.ReadFile( )
+
+    def Main( self ) :
+        self.Setup( )
+        self.Parse( )
+        self.SplitFile( )
+
+
+main = Main( )
+main.Main( )
+
+### Local Variables: ***
+### py-indent-offset:4 ***
+### python-indent:4 ***
+### python-continuation-offset:4 ***
+### tab-width:4  ***
+### End: ***
