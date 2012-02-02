@@ -51,6 +51,15 @@ class Main( object ) :
                                  action="store", dest="rip_file",
                                  help="Specify remote IP address file" )
 
+        self._parser.set_defaults( data_dir = None )
+        self._parser.add_option( "-d", "--data-dir",
+                                 action="store", dest="data_dir",
+                                 help="Specify directory for data files" )
+        self._parser.set_defaults( etc_dir = None )
+        self._parser.add_option( "--etc",
+                                 action="store", dest="etc_dir",
+                                 help="Specify 'etc' directory" )
+
         self._parser.set_defaults( cli_options = [] )
         def CliCallback(option, opt, value, parser):
             parser.values.cli_options += value.split(";")
@@ -71,7 +80,6 @@ class Main( object ) :
                                  action="callback", callback=ReqHdrCallback,
                                  nargs=1, type="string",
                                  help="Specify a request header field" )
-
 
         self._parser.set_defaults( out = None )
         self._parser.add_option( "-o", "--output",
