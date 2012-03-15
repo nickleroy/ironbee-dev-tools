@@ -1,0 +1,49 @@
+{
+   MemcpyReadsTooMuch
+   Memcheck:Addr8
+   fun:__memcpy_ssse3_back
+   fun:bstr_dup_mem
+   fun:htp_parse_request_header_apache_2_2
+   fun:htp_process_request_header_apache_2_2
+   fun:htp_connp_REQ_HEADERS
+   fun:htp_connp_req_data
+   fun:modhtp_iface_data_in
+}
+
+{
+   Lua
+   Memcheck:Cond
+   fun:lj_str_new
+   fun:lua_pushlstring
+   fun:emptybuffer
+   fun:luaL_pushresult
+   fun:luaL_gsub
+   fun:mksymname
+   fun:lj_cf_package_loader_preload
+   fun:lj_BC_FUNCC
+   fun:lj_cf_package_require
+   fun:lj_BC_FUNCC
+   fun:lua_pcall
+   fun:ib_lua_require
+}
+
+{
+   StrStrEx
+   Memcheck:Cond
+   fun:strstr_ex
+   fun:expand_str_ex
+   fun:expand_str
+   fun:core_data_expand_str
+   fun:data_api_expand_str
+   fun:ib_data_expand_str
+}
+
+{
+   StrStrEx
+   Memcheck:Cond
+   fun:strstr_ex
+   fun:expand_str_ex
+   fun:core_data_expand_str
+   fun:data_api_expand_str
+   fun:ib_data_expand_str
+}

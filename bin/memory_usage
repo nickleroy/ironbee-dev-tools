@@ -1,0 +1,282 @@
+#! /usr/bin/env python
+"""
+ * Licensed to Qualys, Inc. (QUALYS) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * QUALYS licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+"""
+
+"""
+This is a Python program to extract the memory usage data from the trace
+module, and to create a CSV file that can be imported into a spreadsheet.
+"""
+
+import re
+import os
+import sys
+from optparse import OptionParser
+
+class MemPool( object ) :
+    def __init__( self, size, in_use ) :
+        self._size   = int(size)
+        self._in_use = int(in_use)
+    Size   = property( lambda self : self._size )
+    InUse  = property( lambda self : self._in_use )
+    Values = property( lambda self : (self.Num,self.Size, self.InUse) )
+
+class NamedMemPool( MemPool ) :
+    def __init__( self, name, size, in_use ) :
+        self._name = name
+        MemPool.__init__( self, size, in_use )
+    Num  = property( lambda self : 1 )
+    Name = property( lambda self : self._name )
+
+class TxMemPool( NamedMemPool ) :
+    _re = re.compile( r'0x([a-f\d]+)' )
+    def __init__( self, name, conn, size, in_use ) :
+        MemPool.__init__( self, size, in_use )
+        m = self._re.search( name )
+        if m is not None :
+            self._name = conn+"/TX"
+            self._addr = int(m.group(1), 16)
+        else :
+            self._name = name
+            self._addr = 0
+    Addr = property( lambda self : self._addr )
+
+class AnonMemPool( MemPool ) :
+    def __init__( self, num, size, in_use ) :
+        self._num = int(num)
+        MemPool.__init__( self, size, in_use )
+    Num  = property( lambda self : self._num )
+    Name = property( lambda self : "+Anonymous" )
+
+class MemPoolTotal( MemPool ) :
+    def __init__( self, num, size, in_use ) :
+        self._num = int(num)
+        MemPool.__init__( self, size, in_use )
+    Num  = property( lambda self : self._num )
+    Name = property( lambda self : "+Totals" )
+
+
+class Dump( object ) :
+    _NamedPoolRe = re.compile(
+        r"Memory pool '(.*)': parent='(.*)' size=(\d+) inuse=(\d+)")
+    _AnonPoolRe = re.compile(
+        r"Anonymous memory pools: num=(\d+) size=(\d+) inuse=(\d+)")
+    _PoolTotalRe = re.compile(
+        r"Memory pool totals: num=(\d+) size=(\d+) inuse=(\d+)")
+
+    def __init__( self ) :
+        self._pools = []
+        self._names = { }
+
+    def AddLine( self, line ) :
+        m = self._NamedPoolRe.search( line )
+        if m is not None :
+            return self.AddNamedPool( m )
+        m = self._AnonPoolRe.search( line )
+        if m is not None :
+            return self.AddAnonPool( m )
+        m = self._PoolTotalRe.search( line )
+        if m is not None :
+            return self.AddPoolTotal( m )
+
+    def AddLineMergeTx( self, line, dumps ) :
+        m = self._NamedPoolRe.search( line )
+        if m is None :
+            return self.AddLine( line )
+        if "TX/" not in line :
+            return self.AddLine( line )
+        return self.AddTxPool( m, dumps )
+
+    def AddPool( self, pool ) :
+        self._pools.append( pool )
+        self._names[pool.Name] = pool
+
+    def AddNamedPool( self, m ) :
+        named = NamedMemPool( m.group(1), m.group(3), m.group(4) )
+        self.AddPool( named )
+
+    def AddTxPool( self, m, dumps ) :
+        if dumps.FindConnection( m.group(2) ) :
+            named = TxMemPool( m.group(1), m.group(2), m.group(3), m.group(4) )
+            prev = dumps.GetDump(-2)
+            if prev is not None :
+                tx = prev.GetTx( )
+        else :
+            named = NamedMemPool( m.group(1), m.group(3), m.group(4) )
+        self.AddPool( named )
+
+    def AddAnonPool( self, m ) :
+        anon = AnonMemPool( m.group(1), m.group(2), m.group(3) )
+        self.AddPool( anon )
+
+    def AddPoolTotal( self, m ) :
+        total = MemPoolTotal( m.group(1), m.group(2), m.group(3) )
+        self.AddPool( total )
+
+    def GetTx( self ) :
+        for pool in self._pools :
+            if isinstance( pool, TxMemPool ) :
+                return pool
+        return None
+
+    def GetConnection( self ) :
+        for name,pool in self._names.items( ) :
+            if name.startswith( 'Connection' ) :
+                return pool
+        return None
+
+    def HasName( self, name ) :
+        return name in self._names
+
+    def AllNames( self ) :
+        return set(self._names.keys())
+
+    def Get( self, name ) :
+        return self._names.get(name)
+
+
+class Dumps( object ) :
+    def __init__( self ) :
+        self._names = set( )
+        self._list = [ ]
+
+    def Add( self, dump ) :
+        self._list.append( dump )
+
+    def End( self, dump ) :
+        self._names |= dump.AllNames( )
+
+    def GetDump( self, num ) :
+        try :
+            return self._list[num]
+        except IndexError :
+            return None
+
+    def FindConnection( self, conn_str ) :
+        for dump in self._list :
+            if dump.HasName( conn_str ):
+                return True
+        return False
+
+    def WriteCsv( self, fname ) :
+        csv = open( fname, "w" )
+        sorted_names = sorted(self._names)
+        keys = [ ]
+        for name in sorted_names :
+            if name.startswith( "+" ) :
+                name = name[1:]
+            keys += ( name+".num", name+".size", name+".in_use" )
+        print >>csv, ";".join(keys)
+        for dump in self._list :
+            l = []
+            for key in sorted_names :
+                values = dump.Get(key)
+                if values is None :
+                    l += ('', '', '')
+                else :
+                    l += [ str(v) for v in values.Values ]
+            print >>csv, ";".join(l)
+        csv.close( )
+
+
+class Main( object ) :
+    def __init__( self ) :
+        self._parser = OptionParser(
+            usage="usage: %prog [options] <infile> <outfile>",
+            version="%prog 0.1" )
+
+    def Setup( self ) :
+
+        self._parser.set_defaults( merge_tx = True )
+        self._parser.add_option( "--merge-tx",
+                                 action="store_true", dest="merge_tx",
+                                 help="Merge TXs with common connection" )
+        self._parser.add_option( "--no-merge-tx",
+                                 action="store_false", dest="merge_tx",
+                                 help="Don't merge TXs with common connection" )
+
+        self._parser.set_defaults( execute = True )
+        self._parser.add_option( "--execute",
+                                 action="store_true", dest="execute",
+                                 help="Enable execution <default>" )
+        self._parser.add_option( "-n", "--no-execute",
+                                 action="store_false", dest="execute",
+                                 help="Disable execution (for test/debug)" )
+        self._parser.set_defaults( verbose = 0 )
+        self._parser.add_option( "-v", "--verbose",
+                                 action="count", dest="verbose",
+                                 help="Increment verbosity level" )
+        self._parser.set_defaults( quiet=False )
+        self._parser.add_option( "-q", "--quiet",
+                                 action="store_true", dest="quiet",
+                                 help="be vewwy quiet (I'm hunting wabbits)" )
+
+    def Parse( self ) :
+        (self._options, args) = self._parser.parse_args()
+
+        if len(args) < 1 :
+            self._parser.error( "no input file specified" )
+        self._in_file = args.pop(0)
+
+        if len(args) < 1 :
+            self._parser.error( "no ouput file specified" )
+        self._out_file = args.pop(0)
+
+        if len(args) :
+            self._parser.error( "Unknown argument '%s'" % (args[0]) )
+
+    def ParseInput( self ) :
+        start_re = re.compile(r'Start Memory Pool Dump \((\w+)\)')
+        end_re = re.compile(r'End Memory Pool Dump \((\w+)\)')
+
+        self._dumps = Dumps( )
+        dump = None
+        for line in open(self._in_file, "r") :
+            if start_re.search( line ) :
+                assert dump is None
+                dump = Dump( )
+                self._dumps.Add( dump )
+                continue
+            if end_re.search( line ) :
+                assert dump is not None
+                self._dumps.End( dump )
+                dump = None
+                continue
+            if dump is not None  and  "pool" in line :
+                if self._options.merge_tx :
+                    dump.AddLineMergeTx( line, self._dumps )
+                else :
+                    dump.AddLine( line )
+
+    def WriteCsv( self ) :
+        self._dumps.WriteCsv( self._out_file )
+
+    def Main( self ) :
+        self.Setup( )
+        self.Parse( )
+        self.ParseInput( )
+        self.WriteCsv( )
+
+
+main = Main( )
+main.Main( )
+
+### Local Variables: ***
+### py-indent-offset:4 ***
+### python-indent:4 ***
+### python-continuation-offset:4 ***
+### tab-width:4  ***
+### End: ***

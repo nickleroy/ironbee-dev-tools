@@ -91,13 +91,13 @@ class Main( object ) :
 
     def __init__( self ) :
         """ Class initializer """
-        if len(sys.argv) < 3 :
-            print >>sys.stderr, "usage: demo <path-to-cli> number"
+        if len(sys.argv) < 2 :
+            print >>sys.stderr, "usage: demo number"
             sys.exit(1)
         v = Vars( )
-        v.Set( "CliPath",  sys.argv[1] )
+        v.Set( "CliPath",  'pycli' )
         v.Set( "DemoDir",  os.getcwd() )
-        num  = v.Set( "DemoNum", sys.argv[2] )
+        num  = v.Set( "DemoNum", sys.argv[1] )
         name = 'demo'+'-'+num
         v.Set( "DemoName", name )
         v.Set( "DemoBase", '$(DemoDir)/$(DemoName)' )
