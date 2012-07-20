@@ -30,6 +30,178 @@ import socket
 import copy
 from subprocess import *
 from optparse import OptionParser
+from configparser import ConfigParser
+
+class ConfigError( Exception ) :
+    pass
+
+class Config ( object ) :
+    def __init__( self, options ) :
+        self._options = options
+        self._site = None
+        self._config = ConfigParser( )
+        try:
+            r = self._config.read( options.rcfile )
+            if len(r) == 0 :
+                raise ConfigError( options.rcfile+": error reading file" )
+        except Exception as e:
+            raise ConfigError( str(e) )
+
+    # Read all of the sites
+    def ReadConfig( self, args ) :
+
+        # Fill in the site with the default if none specified
+        if self._options.site is None :
+            self._options.site = self._config.get( "defaults", "site" )
+        if self._options.site is None :
+            self._parser.error( "no default site and none specified" )
+
+        # Loop through all sections of the configuration
+        mode_found = self._options.mode is None
+        for section_name in self._config.sections() :
+
+            # Ignore "defaults"
+            if section_name == "defaults" :
+                continue
+
+            # Store site section names
+            m = re.match( "site\s+(\S+)", section_name )
+            if m is not None :
+                site = m.group(1)
+                sites[site] = section_name
+                if not site in modes :
+                    modes[site] = { }
+                if not site in tunnels :
+                    tunnels[site] = { }
+                continue
+
+            # Store site mode section names
+            m = re.match( "mode\s+(\w+)/(\S+)", section_name )
+            if m is not None :
+                site = m.group(1)
+                mode = m.group(2)
+                if not site in modes :
+                    modes[site] = { }
+                modes[site][mode] = section_name
+                continue
+
+            # Store tunnel section names
+            m = re.match( "tunnel\s+(\w+)/(\S+)", section_name )
+            if m is not None :
+                site = m.group(1)
+                tunnel = m.group(2)
+                if not site in tunnels :
+                    tunnels[site] = { }
+                tunnels[site][tunnel] = section_name
+                continue
+
+            raise ConfigError( "Unknown section '%s'" % (section_name) )
+
+        # Now, let's process those sections...
+        site = self._options.site
+        mode = self._options.mode
+        if self._options.verbose :
+            print("Looking up site %s mode %s" % ( site, mode ))
+        
+        site_config = sites.get( site )
+        if site_config is None :
+            raise ConfigError( "Site '%s' not found" % (site) )
+        self._site = Site( site )
+        self.ParseSiteConfig( self._site, sites[site] )
+
+        # The site mode config (if specified)
+        if mode is not None :
+            assert site in modes
+            mode_config = modes[site].get(mode)
+            if mode_config is None :
+                raise ConfigError("Site '%s' mode '%s' not found"%(site,mode) )
+            self.ParseSiteConfig( self._site, mode_config )
+
+        # Walk through the args
+        for arg in args :
+            if self._site.isHost( arg ) :
+                self._site.Host = arg
+            elif self._site.isUser( arg ) :
+                self._site.User = arg
+            elif self._options.program is None :
+                self._options.program = arg
+            else :
+                raise Exception( "Unknown argument "+arg )
+
+        # Finally, pull in the tunnels
+        assert site in tunnels
+        for name in list(tunnels[site].keys()) :
+            tunnel = self.ParseTunnelConfig( name, tunnels[site][name] )
+            self._site.AddTunnel( tunnel )
+
+    # Parse a "true/false" value
+    def TrueFalse( self, str, default ) :
+        if str is None :
+            return default
+        elif str.startswith("t") or str.startswith("T") :
+            return True
+        elif str.startswith("f") or str.startswith("F") :
+            return False
+        else :
+            return default
+
+    # Get a config parameter
+    def Get( self, section, item, default = None ) :
+        try :
+            value = self._config.get( section, item )
+        except :
+            value = default
+        return value
+
+    # Parse a site configuration; will modify the site as required
+    def ParseSiteConfig( self, site, section ) :
+        if self._options.verbose :
+            print("Reading section %s for site %s" % ( section, site.Name ))
+
+        tmp = self.Get( section, "hosts" )
+        if tmp is not None :
+            hosts = re.split( '\s+', tmp.strip() )
+            site.Hosts = hosts
+            site.Host  = hosts[0]
+
+        tmp = self.Get( section, "users" )
+        if tmp is not None :
+            users = re.split( '\s+', tmp.strip() )
+            site.Users = users
+            site.User  = users[0]
+
+        tmp = self.Get( section, "domain" )
+        if tmp is not None :
+            site.Domain = tmp
+
+        tmp = self.Get( section, "program" )
+        if tmp is not None :
+            site.Program = tmp
+
+        tmp = self.Get( section, "background" )
+        if tmp is not None :
+            site.Background = self.TrueFalse(tmp, None)
+
+        tmp = self.Get( section, "X" )
+        if tmp is not None :
+            site.XTunnel = self.TrueFalse(tmp, None)
+
+
+    # Parse a tunnel configuration, return the tunnel object
+    def ParseTunnelConfig( self, name, section ) :
+        host = self._config.get( section, "host" )
+        if host is None :
+            raise ConfigError( "Tunnel '%s': no host" % ( section ) )
+
+        remote = self._config.get( section, "remote" )
+        if remote is None :
+            raise ConfigError( "Tunnel '%s': no remote" % ( section ) )
+
+        local = self._config.get( section, "local" )
+        if local is None :
+            raise ConfigError( "Tunnel '%s': no local" % ( section ) )
+
+        return Tunnel( name, host, remote, local )
 
 class Main( object ) :
     """ Main class, does all of the real work """

@@ -1,0 +1,49 @@
+#! /usr/bin/env python
+import os
+import sys
+import re
+import subprocess
+
+# Loop through all of the C files
+do_not_edit = re.compile( r'do not edit', re.I )
+for root, dirs, files in os.walk( ".", topdown=True ) :
+    for i,d in enumerate(dirs) :
+        if d in ( ('.git') ) :
+            dirs.pop(i)
+    for name in files :
+        if not name.endswith( ('.c', '.cc', '.h', '.hh') ) :
+            continue
+        full = os.path.join(root, name)
+        try :
+            orig = open(full, "r").readlines()
+        except IOError as e:
+            print e
+            sys.exit(1)
+
+        diffs = 0
+        new = []
+        for line in orig :
+            if do_not_edit.search(line) :
+                diffs = 0
+                break
+            while line.endswith( ('\r', '\n') ) :
+                line = line[:-1]
+            newline = line.rstrip()
+            if line != newline :
+                diffs += 1
+                line = newline
+            new.append(line)
+
+        if diffs > 0 :
+            try :
+                fp = open(full, "w")
+                for line in new :
+                    print >>fp, line
+                fp.close()
+                print full
+            except IOError as e :
+                print e
+                sys.exit(1)
+
+
+
