@@ -1,0 +1,148 @@
+#! /usr/bin/env python
+"""
+ * Licensed to Qualys, Inc. (QUALYS) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * QUALYS licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+"""
+
+"""
+This is a Python program to wrap the IronBee command line client.
+This program has the ability to read text files with a list of IP
+addresses/host names or user agents, and to invoke the cli with arguments for
+each of those listed.  Additionally, it provides a cleaner and easier to use
+command line; the main cli is encumbered by C and getopt_long().
+"""
+import sys
+import os
+import re
+import tempfile
+import subprocess
+from optparse import OptionParser
+
+class Main( object ) :
+    """ Main class, does all of the real work """
+
+    def __init__( self ) :
+        """ Class initializer; creates the OptionParser object """
+        self._parser = OptionParser(
+            usage="usage: %prog <logfile1> <logfile2> [options]",
+            version="%prog 0.1" )
+
+    def InitParser( self ) :
+
+        self._parser.set_defaults( ignore_config = True )
+        self._parser.add_option( "--ignore-config",
+                                 action="store_true", dest="ignore_config",
+                                 help="Ignore configuration file diffs <default=on>" )
+        self._parser.add_option( "--no-ignore-config",
+                                 action="store_false", dest="ignore_config",
+                                 help="Ignore configuration file diffs <default=on>" )
+
+        self._parser.set_defaults( keep = False )
+        self._parser.add_option( "--keep",
+                                 action="store_true", dest="execute",
+                                 help="Keep temporary files <default=off>" )
+
+        self._parser.set_defaults( execute = True )
+        self._parser.add_option( "--execute",
+                                 action="store_true", dest="execute",
+                                 help="Enable execution <default=on>" )
+        self._parser.add_option( "-n", "--no-execute",
+                                 action="store_false", dest="execute",
+                                 help="Disable execution (for test/debug)" )
+        self._parser.set_defaults( verbose = 0 )
+        self._parser.add_option( "-v", "--verbose",
+                                 action="count", dest="verbose",
+                                 help="Increment verbosity level" )
+        self._parser.set_defaults( quiet=False )
+        self._parser.add_option( "-q", "--quiet",
+                                 action="store_true", dest="quiet",
+                                 help="Be vewwy quiet (I'm hunting wabbits)" )
+
+    def Parse( self ) :
+        """ Parse the command line. """
+        (self._opt, self._args) = self._parser.parse_args()
+        if len(self._args) != 2 :
+            self._parser.error( "Missing args" )
+        self._file1 = self._args[0]
+        self._file2 = self._args[1]
+
+    def FilterLog( self, full ) :
+        fh = open( full )
+        _dir, _file = os.path.split( full )
+        new = tempfile.NamedTemporaryFile(dir=_dir, prefix=_file+'.', delete=False)
+        re_dt   = re.compile( r'\d{8}\.\d{2}h\d{2}m\d{2}s' );
+        re_pid  = re.compile( r'\[\d+\] (.*)' );
+        re_ptr  = re.compile( r'0x[\da-fA-F]+' )
+        re_conf = re.compile( r'@ ([^s]+):(\d+)' )
+        for line in fh :
+            line = line.strip()
+
+            # Remove date/time
+            if re_dt.match( line ) :
+                line = line[19:]
+
+            # Remove PID
+            m = re_pid.match( line )
+            if m is not None :
+                line = m.group(1)
+
+            # Fix pointer addresses
+            line = re_ptr.sub( '0xXXXXXXXX', line )
+
+            # Fix configuration file info
+            if self._opt.ignore_config :
+                line = re_conf.sub( r'@ \1:X', line )
+
+            print >>new, line
+        new.close( )
+        return new.name
+        
+    def RunDiff( self, f1, f2 ) :
+        """ Run kompare """
+        cmd = [ 'kompare', f1, f2 ]
+        if not self._opt.execute :
+            print "Not executing:", cmd
+            return
+        if not self._opt.quiet :
+            print "Executing:", cmd
+        subprocess.call( cmd )
+        
+    def Init( self ) :
+        """ Initialize everything """
+        self.InitParser( )
+        self.Parse( )
+
+    def Main( self ) :
+        """ Main execution """
+        diff1 = self.FilterLog( self._file1 )
+        diff2 = self.FilterLog( self._file2 )
+        self.RunDiff( diff1, diff2 )
+        if not self._opt.keep :
+            os.remove( diff1 )
+            os.remove( diff2 )
+        else :
+            print diff1, diff2
+
+
+main = Main( )
+main.Init( )
+main.Main( )
+
+### Local Variables: ***
+### py-indent-offset:4 ***
+### python-indent:4 ***
+### python-continuation-offset:4 ***
+### tab-width:4  ***
+### End: ***
