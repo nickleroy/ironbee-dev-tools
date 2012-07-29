@@ -1,0 +1,272 @@
+#! /usr/bin/env python
+import os
+import sys
+import re
+import time
+import random
+import signal
+import subprocess
+from optparse import OptionParser
+
+class ParseError( Exception ) : pass
+
+class Main( object ) :
+    def __init__( self ) :
+        self._parser = OptionParser(
+            usage="usage: %prog [options]",
+            version="%prog 0.1" )
+
+    def Setup( self ) :
+        self._parser.set_defaults( alarm=1.0 )
+        self._parser.add_option( "--timeout", "-t",
+                                 action="store", dest="alarm", type="float",
+                                 help="Set curl alarm timeout <1.0>" )
+
+        self._parser.set_defaults( num_urls=10 )
+        self._parser.add_option( "--num-urls", "-u",
+                                 action="store", dest="num_urls", type="int",
+                                 help="Specify # of URLs to pass to curl <10>" )
+
+        self._parser.set_defaults( url_timeout=1.0 )
+        self._parser.add_option( "--url-timeout", "--ut",
+                                 action="store", dest="url_timeout",
+                                 type="float",
+                                 help="Specify # alarm increment / URL <1.0>" )
+
+        self._parser.set_defaults( loops=10 )
+        self._parser.add_option( "--loops", "-l",
+                                 action="store", dest="urls", type="int",
+                                 help="Specify # of execution loops <10>" )
+
+        self._parser.set_defaults( processes=1 )
+        self._parser.add_option( "--procs", "--processes", "-p",
+                                 action="store", dest="processes", type="int",
+                                 help="Specify # of processes <1>" )
+
+        self._parser.set_defaults( output = "/dev/null" )
+        self._parser.add_option( "--no-output",
+                                 action="store_const", dest="output",
+                                 const="/dev/null",
+                                 help="Redirect curl output to /dev/null" )
+        self._parser.add_option( "--stdout",
+                                 action="store_const", dest="output",
+                                 const=None,
+                                 help="Redirect curl output to /dev/stdout" )
+
+        self._parser.set_defaults( ib_dir = None )
+        self._parser.add_option( "--ib",
+                                 action="store", dest="ib_dir",
+                                 help="Specify alternate ib directory <$HOME/.ib>" )
+
+        self._parser.set_defaults( rc_file = None )
+        self._parser.add_option( "--rc",
+                                 action="store", dest="rc_file",
+                                 help="Specify RC file <$HOME/.ib/ib-runcurl.rc>" )
+
+        self._parser.set_defaults( execute = True )
+        self._parser.add_option( "--execute",
+                                 action="store_true", dest="execute",
+                                 help="Enable execution <default>" )
+        self._parser.add_option( "-n", "--no-execute",
+                                 action="store_false", dest="execute",
+                                 help="Disable execution (for test/debug)" )
+        self._parser.set_defaults( verbose = 0 )
+        self._parser.add_option( "-v", "--verbose",
+                                 action="count", dest="verbose",
+                                 help="Increment verbosity level" )
+        self._parser.set_defaults( quiet=False )
+        self._parser.add_option( "-q", "--quiet",
+                                 action="store_true", dest="quiet",
+                                 help="be vewwy quiet (I'm hunting wabbits)" )
+
+    def Parse( self ) :
+        (self._opt, self._args) = self._parser.parse_args()
+        for url in self._args :
+            self._pages.append( url )
+
+        if self._opt.ib_dir is None :
+            self._opt.ib_dir = os.path.join(os.environ["HOME"], ".ib")
+        if self._opt.rc_file is None :
+            self._opt.rc_file = os.path.join(self._opt.ib_dir, "ib-runcurl.rc")
+
+        if self._opt.output is None :
+            self._out = None
+        else :
+            self._out = open(self._opt.output, "w")
+        self._alarm = self._opt.alarm + \
+                                ( self._opt.num_urls * self._opt.url_timeout )
+
+    def Init( self ) :
+        self._proxy = "localhost:8180"
+        self._pages = []
+        self.Setup( )
+        self._p = None
+        self._children = set( )
+        self._term = False
+        self._timeout = False
+
+    def ParseRcLine( self, line ) :
+        if '=' in line :
+            s = line.split( '=', 1 )
+            var = s[0].rstrip()
+            value = s[1].lstrip()
+            if var == "url" :
+                if re.match( r'\w+://', value ) :
+                    self._pages.append(value)
+                else :
+                    raise ParseError( "Invalid url '%s'" % ( value ) )
+            else :
+                raise ParseError( "Unknown setting '%s'" % ( var ) )
+        else :
+            raise ParseError( "Can't parse line" )
+
+    def ReadRc( self ) :
+        lno = -1
+        try :
+            rc = open( self._opt.rc_file )
+            for lno, line in enumerate(rc) :
+                self.ParseRcLine( line.strip() )
+            rc.close( )
+            lno = -1
+            if len(self._pages) == 0 :
+                raise ParseError( "No URLs" )
+        except IOError as e :
+            print >>sys.stderr, "Error reading rc file ", self._opt.rc_file, e
+            sys.exit( 1 )
+        except ParseError as e :
+            print >>sys.stderr, "Error parsing rc file %s line %d: %s" % \
+                ( self._opt.rc_file, lno, e )
+            sys.exit( 1 )
+
+    def KillCurl( self, reason ) :
+        if self._p is not None :
+            print "Killing curl", self._p.pid, ":", reason
+            self._p.kill()
+
+    def RunCurl( self ) :
+        cmd = [ "curl", "-x", self._proxy ]
+        if self._opt.verbose :
+            cmd.append( "-v" )
+        else :
+            cmd.append( "-s" )
+        for n in range(self._opt.num_urls) :
+            cmd.append( random.choice(self._pages) )
+        signal.alarm( int(round(self._alarm)) )
+        if not self._opt.execute :
+            print "Not running:", cmd
+        if self._opt.verbose :
+            print "Running:", cmd
+        if  self._opt.execute :
+            if self._out is None :
+                self._p = subprocess.Popen( cmd )
+            else :
+                self._p = subprocess.Popen( cmd, stdout=self._out )
+        print "Created child process", self._p.pid
+        ret = self._p.wait( )
+        signal.alarm(0)
+        self._p = None
+        if ret :
+            print "Exit status is", ret
+            sys.exit(ret)
+
+    def HandleCurlTerm(self, signum, frame) :
+        self.KillCurl( "TERM" )
+
+    def CurlTimeout(self, signum, frame) :
+        self.KillCurl( "Timeout" )
+
+    def Loop( self ) :
+        signal.signal(signal.SIGALRM, self.CurlTimeout)
+        signal.signal(signal.SIGTERM, self.HandleCurlTerm)
+        signal.signal(signal.SIGQUIT, self.HandleCurlTerm)
+        signal.signal(signal.SIGINT,  self.HandleCurlTerm)
+        for run in range(self._opt.loops) :
+            self.RunCurl( )
+
+    def Reaper(self, signum, frame) :
+        pid, status = os.waitpid( 0, os.WNOHANG )
+        if pid != 0 :
+            try :
+                self._children.remove( pid )
+                print "Child", pid, "exited with status", status
+            except KeyError :
+                print "Unknown child", pid, "exited with status", status
+
+    def SignalChildren( self, kill, reason ) :
+        if kill :
+            sig = signal.SIGKILL
+            msg = "Hard kill"
+        else :
+            sig = signal.SIGTERM
+            msg = "Kill"
+        print "%s %d children %s: %s" % \
+            ( msg, len(self._children), self._children, reason )
+        pids = self._children.copy()
+        for pid in pids :
+            try :
+                os.kill( pid, sig )
+            except OSError :
+                pass
+
+    def KillChildren( self, term, sleep, reason ) :
+        if term :
+            self.SignalChildren( False, reason )
+            time.sleep( 2 )
+        self.SignalChildren( True, reason )
+
+    def ChildTimeout( self, signum, frame ) :
+        self._timeout = True
+
+    def HandleChildTerm( self, signum, frame ) :
+        self._term = True
+
+    def Wait( self ) :
+        signal.signal(signal.SIGALRM, self.ChildTimeout)
+        signal.signal(signal.SIGTERM, self.HandleChildTerm)
+        signal.signal(signal.SIGQUIT, self.HandleChildTerm)
+        signal.signal(signal.SIGINT,  self.HandleChildTerm)
+        signal.alarm( int(round(self._alarm)) )
+
+        loop = True
+        children = None
+        while loop  and  len(self._children) :
+            if self._term :
+                self.KillChildren( True, 2, "TERM" )
+                loop = False
+            elif self._timeout :
+                self.KillChildren( True, 20, "Timeout" )
+                loop = False
+            elif children != self._children :
+                print "Waiting for %d children: %s" % \
+                    ( len(self._children), self._children )
+                children = self._children.copy()
+                time.sleep( 5 )
+
+    def RunProcs( self ) :
+        signal.signal(signal.SIGCHLD, self.Reaper)
+        for n in range(self._opt.processes) :
+            try :
+                pid = os.fork( )
+                if pid == 0 :
+                    self.Loop( )
+                    sys.exit( 0 )
+                else :
+                    self._children.add( pid )
+            except OSError as e :
+                print >>sys.stderr, "fork() failed:", e
+                self.KillChildren( False, 0, "Error" )
+                sys.exit(1)
+
+    def Run( self ) :
+        self.ReadRc( )
+        if self._opt.processes == 1 :
+            self.Loop( )
+        else :
+            self.RunProcs( )
+            self.Wait( )
+
+
+main = Main( )
+main.Init( )
+main.Parse( )
+main.Run( )
