@@ -1,0 +1,296 @@
+#! /usr/bin/env python
+# ****************************************************************************
+# Licensed to Qualys, Inc. (QUALYS) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# QUALYS licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ****************************************************************************
+import re
+import os
+import sys
+import copy
+import subprocess
+import argparse
+
+class Tool( object ) :
+    def __init__( self, name, prefix=None, defs=None ) :
+        self._name = name
+        self._prefix = prefix if prefix is not None else ( )
+        self._defs = defs if defs is not None else { }
+        if "ToolName" not in self._defs :
+            self._defs["ToolName"] = name
+        for p in self._prefix :
+            if "${ToolOut}" in p :
+                self._defs["ToolOut"] = "ats." + name + ".${Run}"
+                break
+        self._defs["DefaultOut"] = "ats." + name + ".out.${Run}"
+
+    Prefix   = property( lambda self : self._prefix )
+    Defs     = property( lambda self : self._defs )
+    ToolName = property( lambda self : self._defs["ToolName"] )
+    ToolOut  = property( lambda self : self._defs.get("ToolOut", None) )
+
+
+class Main( object ) :
+    valgrind = ( "${ToolName}", "--tool=${SubTool}", "-v", "-v", "--log-file=${ToolOut}" )
+    _CmdPrefixes = {
+        "none"     : Tool("none" ),
+        "gdb"      : Tool("gdb",      prefix=("${ToolName}", "--args") ),
+        "strace"   : Tool("strace",   prefix=("${ToolName}", "-o", "${ToolOut}") ),
+        "valgrind" : Tool("valgrind", prefix=valgrind, defs={"SubTool":"memcheck"}),
+        "helgrind" : Tool("helgrind", prefix=valgrind, defs={"SubTool":"helgrind"}),
+        }
+
+    def __init__( self ) :
+        self._defs = { "PID"         : os.getpid(),
+                       "Run"         : "${PID}",
+                       "Devel"       : "/home/nleroy/devel",
+                       "Etc"         : "${Devel}/etc",
+                       "AtsVer"      : "3.2.0",
+                       "AtsDir"      : "/build/nleroy/install/trafficserver-${AtsVer}",
+                       "AtsVar"      : "${AtsDir}/var",
+                       "AtsLog"      : "${AtsVar}/log/trafficserver",
+                       "AtsLogFiles" : "${AtsLog}/*",
+                       "AtsEtc"      : "${Etc}/trafficserver/cur",
+                       "Prog"        : "${AtsDir}/bin/traffic_server",
+                       "Trace"       : 'http.*|dns.*|http_hdrs|sdk|ironbee',
+                       "Args"        : [ '-T${Trace}' ],
+                       "Cmd"         : [ "${Prog}", "${Args}" ],
+                       "IbEtc"       : "${Etc}/ironbee.in",
+                       "PreCmds"     : { "ATS" : ["make", "-C", "${AtsEtc}"],
+                                         "IB"  : ["make", "-C", "${IbEtc}"], },
+                       }
+        self._parser = argparse.ArgumentParser( description="Run ATS with IronBee",
+                                                prog="ib-ats" )
+
+
+    def ParserSetup( self ) :
+        self._parser.add_argument( "--default",
+                                   action="store_const", dest="tool", default="none",
+                                   const="None",
+                                   help="Run ATS natively" )
+        self._parser.add_argument( "--gdb",
+                                   action="store_const", dest="tool", const="gdb",
+                                   help="Run ATS under gdb" )
+        self._parser.add_argument( "--strace",
+                                   action="store_const", dest="tool",
+                                   const="strace",
+                                   help="Run ATS under strace" )
+        self._parser.add_argument( "--valgrind",
+                                   action="store_const", dest="tool",
+                                   const="valgrind",
+                                   help="Run ATS under valgrind (memtool)" )
+        self._parser.add_argument( "--helgrind",
+                                   action="store_const", dest="tool",
+                                   const="helgrind",
+                                   help="Run ATS under helgrind")
+
+        self._parser.add_argument( "--append-tool-arg", "-a",
+                                   action="append", dest="tool_args", default=[],
+                                   help="Add tool-specific argument" )
+
+        self._parser.add_argument( "--out", "-o",
+                                   dest="output", type=argparse.FileType('w'), default=None,
+                                   help='Specify output file')
+        self._parser.add_argument( "--default-out", "--do",
+                                   action="store_const", dest="output",
+                                   const="${DefaultOut}",
+                                   help="Use default stdout file" )
+
+        self._parser.add_argument( "--clean", "-c",
+                                   action="store_true", dest="clean", default=False,
+                                   help="Clean log files before starting ATS")
+
+        self._parser.set_defaults( defs = [] )
+        class StrAction(argparse.Action):
+            def __call__(self, parser, namespace, values, option_string=None):
+                for s in values :
+                    try :
+                        name, value = s.split( '=', 1 )
+                        namespace.defs.append( (name.strip(), value) )
+                    except ValueError :
+                        parser.error( "Invalid definition '"+s+"'" )
+        self._parser.add_argument( "strings", metavar='n=v', type=str,
+                                   action=StrAction, nargs='*',
+                                   help="Specify name=value definitions" )
+
+        self._parser.add_argument( "--print-defs", "-p",
+                                   action="store_const", const="print",
+                                   dest="print_mode", default=None,
+                                   help="Print definition table and exit." )
+        self._parser.add_argument( "--print-expanded", "-pe",
+                                   action="store_const", dest="print_mode", const="expand",
+                                   help="Print expanded definition table and exit." )
+
+        self._parser.add_argument( "--execute",
+                                   action="store_true", dest="execute", default=True,
+                                   help="Enable execution <default>" )
+        self._parser.add_argument( "-n", "--no-execute",
+                                   action="store_false", dest="execute",
+                                   help="Disable execution (for test/debug)" )
+        self._parser.add_argument( "-v", "--verbose",
+                                   action="count", dest="verbose", default=0,
+                                   help="Increment verbosity level" )
+        self._parser.add_argument( "-q", "--quiet",
+                                   action="store_true", dest="quiet", default=False,
+                                   help="be vewwy quiet (I'm hunting wabbits)" )
+
+    def Parse( self ) :
+        self._args = self._parser.parse_args()
+        for name,value in self._args.defs :
+            self._defs[name] = value
+        self._tool = self._CmdPrefixes[self._args.tool]
+        if self._args.clean :
+            self._defs["PreCmds"]["Clean"] = [ "/bin/rm", "${AtsLogFiles}" ]
+        if self._args.output is not None :
+            self._defs["Output"] = self._args.output
+
+    def Expand( self, args ) :
+        loops = 0
+        if self._args.verbose >= 2 :
+            print "Expanding:", args
+            print "  using:", self._defs
+        while True :
+            initial = copy.copy(args)
+            for n,arg in enumerate(args) :
+                for key,value in self._defs.items() :
+                    s = '${'+key+'}'
+                    c = copy.copy(args)
+                    if arg == s  and  type(value) == list :
+                        expanded = self.Expand(value)
+                        args = args[:n] + expanded + args[n+1:]
+                        if self._args.verbose >= 3 :
+                            print c, key+"="+str(expanded), "->", args
+                        continue
+                    if s in arg :
+                        args[n] = arg.replace(s, str(value))
+                        if self._args.verbose >= 3 :
+                            print c, key+"="+str(value), "->", args
+            if initial == args  or  loops > 10 :
+                if self._args.verbose >= 2 :
+                    print "Expanded:", args
+                return args
+            loops += 1
+
+    def ExpandStr( self, s ) :
+        if s is None :
+            return None
+        expanded = self.Expand( [s] )
+        assert len(expanded) == 1
+        return expanded[0]
+
+    def ExpandItem( self, item ) :
+        if item is None :
+            return None
+        elif type(item) == str :
+            return self.ExpandStr( item )
+        else :
+            return self.Expand( item )
+
+    def RunPre( self ) :
+        cmds = self._defs["PreCmds"]
+        for name, cmd in cmds.items() :
+            cmd = self.Expand(cmd)
+            if not self._args.execute :
+                print "Not running:", cmd
+                continue
+            if self._args.verbose :
+                print "%s: Executing \"%s\"" % (name, str(cmd))
+            status = subprocess.call( cmd )
+            if status :
+                print "Exit status is", status
+
+
+    def RunATS( self ) :
+        for key,value in self._tool.Defs.items() :
+            if key not in self._defs :
+                self._defs[key] = value
+        tmp = [ ]
+        tmp += self._tool.Prefix
+        tmp += self._args.tool_args
+        tmp += self._defs["Cmd"]
+        cmd = self.Expand( tmp )
+
+        if not self._args.execute :
+            print "Not running:", cmd
+            return
+
+        outfile = self._defs.get("Output")
+        if outfile is not None :
+            outfile = self.ExpandStr( outfile )
+
+        if self._args.verbose :
+            print "Running:", cmd
+            if outfile is not None :
+                print "Output ->", outfile
+        try :
+            if outfile is None :
+                status = subprocess.call( cmd )
+            else :
+                out = open( outfile, "w" )
+                p = subprocess.Popen( cmd,
+                                      stdout=subprocess.PIPE,
+                                      stderr=subprocess.STDOUT )
+                for line in p.stdout :
+                    print >>out, line.strip()
+                    if self._args.verbose >= 2 :
+                        print line.strip()
+                p.wait()
+                status = p.returncode
+        except KeyboardInterrupt:
+            status = 0
+        if status :
+            print "Exit status is", status
+        if self._tool.ToolOut is not None :
+            print self._tool.ToolName, "output is in", self.ExpandStr(self._tool.ToolOut)
+
+    def PrintTable( self ) :
+        for name, value in self._defs.items( ) :
+            if self._args.print_mode == "print" :
+                print name, "=", value
+                continue
+
+            expanded = value
+            if type(value) == str :
+                expanded = self.ExpandStr(value)
+            elif type(value) == int :
+                expanded = value
+            elif type(value) in (list, tuple) :
+                expanded = [ self.ExpandItem(v) for v in value ]
+            elif type(value) == dict :
+                expanded = { }
+                for n,v in value.items( ) :
+                    expanded[n] = self.ExpandItem(v)
+            else :
+                print >>sys.stderr, "I don't know how to expand", \
+                    name, "with type", type(value)
+            print name, "=", expanded
+        
+    def Main( self ) :
+        self.ParserSetup( )
+        self.Parse( )
+        if self._args.print_mode is not None :
+            self.PrintTable( )
+            sys.exit(0)
+        self.RunPre( )
+        self.RunATS( )
+
+main = Main( )
+main.Main( )
+
+### Local Variables: ***
+### py-indent-offset:4 ***
+### python-indent:4 ***
+### python-continuation-offset:4 ***
+### tab-width:4  ***
+### End: ***
