@@ -1,0 +1,344 @@
+#! /usr/bin/env python
+"""
+ * Licensed to Qualys, Inc. (QUALYS) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * QUALYS licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+"""
+
+"""
+This is a Python program to analyze valgrind (currently only helgrind) output,
+and filter out 99% of the events.
+"""
+import re
+import os
+import sys
+from optparse import OptionParser
+
+
+class Options( object ) :
+    def __init__( self ) :
+        self._parser = OptionParser(
+            usage="usage: %prog [options] <file>",
+            version="%prog 0.1" )
+
+        self._parser.set_defaults( dummy = True )
+        self._parser.add_option( "-:", "--dummy",
+                                 action="store_true", dest="dummy",
+                                 help="Dummy argument to end file list" )
+
+        self._parser.set_defaults( execute = True )
+        self._parser.add_option( "--execute",
+                                 action="store_true", dest="execute",
+                                 help="Enable execution <default>" )
+        self._parser.add_option( "-n", "--no-execute",
+                                 action="store_false", dest="execute",
+                                 help="Disable execution (for test/debug)" )
+        self._parser.set_defaults( verbose = 0 )
+        self._parser.add_option( "-v", "--verbose",
+                                 action="count", dest="verbose",
+                                 help="Increment verbosity level" )
+        self._parser.set_defaults( quiet=False )
+        self._parser.add_option( "-q", "--quiet",
+                                 action="store_true", dest="quiet",
+                                 help="be vewwy quiet (I'm hunting wabbits)" )
+
+    def Parse( self ) :
+        (self._options, self._args) = self._parser.parse_args()
+        if len(self._args) != 1 :
+            self._parser.error( "no file specified" )
+        self._options.file = self._args[0]
+
+    Opts = property( lambda self:self._options)
+
+
+class ReMatcher( object ) :
+    """ Base re-matched object """
+
+    @classmethod
+    def Create( cls, line, *args, **kwargs ) :
+        match = cls._re.match( line )
+        if match is None :
+            return None
+        return cls._Create( match, *args, **kwargs )
+
+
+class StackFrame( object ) :
+    """ Stack frame object """
+    def __init__( self, address, name, srcfile, srcline ) :
+        self._address = address
+        self._name = name
+        self._srcfile = srcfile
+        self._srcline = srcline
+
+    Name    = property( lambda self : self._name )
+    Address = property( lambda self : self._address )
+    SrcFile = property( lambda self : self._srcfile )
+    SrcLine = property( lambda self : self._srcline )
+
+class StackFrameParser( ReMatcher ) :
+    """ Stack frame parser class """
+    _re = re.compile(
+        r'==\d+==\s+(at|by) (0x[\da-fA-F]+): (.*) \((.*):(\d+)\)$' )
+
+    def _Create( self, match ) :
+        address = m.group(2)
+        name = m.group(3)
+        srcfile = m.group(4)
+        srcline = int(m.group(5))
+        return StackFrame( address, name, srcfile, srcline )
+
+
+class Stack( object ) :
+    """ Call stack """
+    def __init__(self, name) :
+        self._list = list
+        self._name = name
+
+    def AddFrame( self, frame ) :
+        assert isinstance(frame, StackFrame)
+        self._list.append( frame )
+        return frame
+
+    Frames = property( lambda self : self._list )
+    NumFrames = property( lambda self : len(self._list) )
+
+
+class StackParser( object ) :
+    @staticmethod
+    def HandleLine( stack, line ) :
+        if stack is None :
+            return None
+        frame = StackFrameParser.Create( line )
+        if frame is not None :
+            stack.AddFrame( frame )
+        return frame
+
+
+class Lock( Stack ) :
+    """ Lock class """
+    def __init__( self, address ) :
+        address = address
+        Stack.__init__( "Lock "+self._address )
+
+class LockParser( ReMatcher ) :
+    """ Lock parser class """
+    _re = re.compile( r'==\d+==\s+Lock at (0x[\da-fA-F]+) was first observed' )
+
+    def _Create( self, match ) :
+        ReMatcher.__init__( match )
+        self._address = m.group(1)
+        return Lock( address )
+
+    @staticmethod
+    def HandleLine( lock, line ) :
+        if lock is None :
+            return None
+        return StackParser.HandleLine( lock )
+
+    Address = property( lambda self : self._address )
+
+
+class Locks( object ) :
+    def __init__( self ) :
+        self._locks = dict( )
+        self._lock = None
+
+    def AddLock( self, lock ) :
+        if lock.Name not in self._locks :
+            self._locks[lock.Name] = lock
+        self._lock = lock
+        return lock
+
+    def AddFrame( self, frame ) :
+        assert self._Lock is not None
+        self._lock.AddFrame( frame )
+
+    NumLocks = property( lambda self : len(self._locks) )
+    Current  = property( lambda self : self._lock )
+
+    def __getattr__(self, name) :
+        if name.startswith( ('0x', '0X') ) :
+            return self._locks[name]
+        else :
+            raise KeyError( name )
+
+
+class LocksParser( ReMatcher ) :
+    """ Locks Parser object """
+    _re = re.compile( r'----------------' )
+
+    def _Create( self, match ) :
+        return Locks( )
+
+    @staticmethod
+    def HandleLine( locks, line ) :
+        if locks is None :
+            return None
+        if locks.Current is None :
+            lock = LockParser.Create( line )
+            if lock is not None :
+                return locks.AddLock( lock )
+        else :
+            frame = StackFrameParser.Create( line )
+            if frame is not None :
+                return Locks.AddFrame( frame )
+        return None
+
+
+class Thread( Stack ) :
+    """ Thread object """
+    def __init__( self, num, locks ) :
+        self._num = num
+        Stack.__init__( str(num) )
+        self._locks = locks
+
+
+class ThreadParser( ReMatcher ) :
+    """ Thread parser class """
+    _re = re.compile( r'==\d+==\s+Locks held:\s+'+
+                      r'(None|(\d+), at address(?:es)? (.*))' )
+
+    def _Create( self, match, num ) :
+        assert match is not None
+        assert type(match) == re.MatchObject
+        if match.group(1) == "None" :
+            return Thread.__init__( num, None )
+
+        count = int(m.group(2))
+        addrs = m.group(3).split(' ')
+        assert len(addrs) == count
+        return Thread.__init__( num, addrs )
+
+
+class Conflict( object ) :
+    """ Base conflict """
+    def __init__( self, _type, _size, _thread ) :
+        self._type = _type
+        self._size = _size
+        self._thread = _thread
+        self._stack = Stack( "Conflict thread #%d" % (_thread) )
+
+    Type   = property( lambda self : self._type )
+    Size   = property( lambda self : self._size )
+    Thread = property( lambda self : self._thread )
+    Stack  = property( lambda self : self._stack )
+
+
+class ConflictParser( ReMatcher ) :
+    _re = re.compile( r'==\d+==\s+This conflicts with previous '+
+                      r'(read|write) of size (\d+) by thread #(\d+)' )
+
+    def _Create( self, match ) :
+        self._size = int(match.group(1))
+        self._thread = int(match.group(3))
+        self._type = match.group(2)
+        return Conflict( _type, size, thread )
+
+    @staticmethod
+    def HandleLine( conflict, line ) :
+        if conflict is None :
+            return None
+        return StackParser.HandleLine( conflict.Stack, line )
+
+
+class Race( object ) :
+    """ Base race condition class """
+    def __init__( self, address, locks, conflict ) :
+        self._address = address
+        self._conflicts = [ conflict ]
+        self._locks = locks
+        self._conflict = None
+
+    Conflicts   = property( lambda self : self._conflicts )
+    Locks       = property( lambda self : self._locks )
+    CurConflict = property( lambda self : self._conflict )
+
+
+class RaceParser( ReMatcher ) :
+    """ Race matched object """
+    _re = re.compile( r'==\d+==\s+Possible race during (read|write) '+
+                      r'of size (\d+) at (0x[\da-fA-F]+) by thread #(\d+)')
+
+    def _Create( self, match, locks ) :
+        _type = match.group(1)
+        size = int(match.group(2))
+        address = match.group(3)
+        thread = int(match.group(4))
+        conflict = Conflict( _type, size, thread )
+        return Race( address, locks, conflict )
+
+    @staticmethod
+    def HandleLine( race, line ) :
+        if race is None :
+            return None
+        if race.CurConflict is not None :
+            if ConflictParser.HandleLine( race.CurConflict, line ) is None :
+                self._conflict = None
+            return None
+        conflict = ConflictParser.Create( line )
+        if conflict is None :
+            return None
+        self._conflict = conflict
+        self._conflicts.append( conflict )
+        return conflict
+
+
+class Main( object ) :
+    def __init__( self ) :
+        self._opt = Options( )
+        self._opt.Parse( )
+        self._locks = None
+        self._race = None
+
+    def ProcessLine( self, line ) :
+        if self._race is None :
+            self._race = RaceParser.Create( line, self._locks )
+            if self._race is not None :
+                self._locks = None
+                print "Created", self._race
+                return
+
+        if self._locks is None :
+            self._locks = LocksParser.Create( line )
+            if self._locks is not None :
+                self._race = None
+                print "Created", self._locks
+                return
+
+        obj = RaceParser.HandleLine( self._race, line )
+        if obj is not None :
+            print "Created", obj
+            return
+
+        obj = LockParser.HandleLine( self._locks, line )
+        if obj is not None :
+            print "Created", obj
+            return
+
+
+    def ReadFile( self ) :
+        try :
+            fp = open( self._opt.Opts.file )
+            for line in fp :
+                self.ProcessLine( line.strip() )
+            fp.close( )
+        except IOError as e :
+            print >>sys.stderr, e
+            sys.exit(1)
+
+    def Main( self ) :
+        self.ReadFile( )
+
+main = Main()
+main.Main()
