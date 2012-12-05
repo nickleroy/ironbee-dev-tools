@@ -54,11 +54,11 @@ class Main( object ) :
     def __init__( self ) :
         self._defs = { "PID"         : os.getpid(),
                        "Run"         : "${PID}",
-                       "Devel"       : "/home/nleroy/devel",
+                       "Devel"       : os.environ["QDEVEL"],
                        "Etc"         : "${Devel}/etc",
                        "EtcIn"       : "${Devel}/etc.in",
                        "AtsVer"      : "3.2.0",
-                       "AtsDir"      : "/build/nleroy/install/trafficserver-${AtsVer}",
+                       "AtsDir"      : os.path.join(os.environ["QINSTALL"], "trafficserver-${HttpdVer}"),
                        "AtsVar"      : "${AtsDir}/var",
                        "AtsLog"      : "${AtsVar}/log/trafficserver",
                        "AtsLogFiles" : "${AtsLog}/*",
