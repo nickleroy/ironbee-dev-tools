@@ -19,13 +19,15 @@ import re
 import os
 import sys
 import copy
+import glob
 import subprocess
 import argparse
 
 class Tool( object ) :
-    def __init__( self, name, prefix=None, defs=None ) :
+    def __init__( self, name, prefix=None, args=None, defs=None ) :
         self._name = name
         self._prefix = prefix if prefix is not None else ( )
+        self._args = args if args is not None else ( )
         self._defs = defs if defs is not None else { }
         if "ToolName" not in self._defs :
             self._defs["ToolName"] = name
@@ -36,6 +38,7 @@ class Tool( object ) :
         self._defs["DefaultOut"] = "ats." + name + ".out.${Run}"
 
     Prefix   = property( lambda self : self._prefix )
+    Args     = property( lambda self : self._args )
     Defs     = property( lambda self : self._defs )
     ToolName = property( lambda self : self._defs["ToolName"] )
     ToolOut  = property( lambda self : self._defs.get("ToolOut", None) )
@@ -45,57 +48,58 @@ class Main( object ) :
     valgrind = ( "${ToolName}", "--tool=${SubTool}", "-v", "-v", "--log-file=${ToolOut}" )
     _CmdPrefixes = {
         "none"     : Tool("none" ),
-        "gdb"      : Tool("gdb",      prefix=("${ToolName}", "--args") ),
+        "gdb"      : Tool("gdb",      prefix=("${ToolName}", "--args"), args=("-X",) ),
         "strace"   : Tool("strace",   prefix=("${ToolName}", "-o", "${ToolOut}") ),
         "valgrind" : Tool("valgrind", prefix=valgrind, defs={"SubTool":"memcheck"}),
         "helgrind" : Tool("helgrind", prefix=valgrind, defs={"SubTool":"helgrind"}),
         }
 
     def __init__( self ) :
-        self._defs = { "PID"         : os.getpid(),
-                       "Run"         : "${PID}",
-                       "Devel"       : "/home/nleroy/devel",
-                       "Etc"         : "${Devel}/etc",
-                       "EtcIn"       : "${Devel}/etc.in",
-                       "AtsVer"      : "3.2.0",
-                       "AtsDir"      : "/build/nleroy/install/trafficserver-${AtsVer}",
-                       "AtsVar"      : "${AtsDir}/var",
-                       "AtsLog"      : "${AtsVar}/log/trafficserver",
-                       "AtsLogFiles" : "${AtsLog}/*",
-                       "AtsEtcIn"    : "${EtcIn}/trafficserver/cur",
-                       "AtsEtc"      : "${Etc}/trafficserver",
-                       "Prog"        : "${AtsDir}/bin/traffic_server",
-                       "Trace"       : 'http.*|dns.*|http_hdrs|sdk|ironbee',
-                       "Args"        : [ '-T${Trace}' ],
-                       "Cmd"         : [ "${Prog}", "${Args}" ],
-                       "IbEtc"       : "${EtcIn}/ironbee",
-                       "PreCmds"     : { "ATS" : ["make", "-C", "${AtsEtcIn}"],
-                                         "IB"  : ["make", "-C", "${IbEtc}"], },
+        self._defs = { "PID"           : os.getpid(),
+                       "Run"           : "${PID}",
+                       "Devel"         : "/home/nleroy/devel",
+                       "Var"           : "${Devel}/var",
+                       "Log"           : "${Var}/log",
+                       "Etc"           : "${Devel}/etc",
+                       "EtcIn"         : "${Devel}/etc.in",
+                       "HttpdVer"      : "2.4.3",
+                       "HttpdDir"      : "/build/nleroy/install/httpd-${HttpdVer}",
+                       "HttpdLog"      : "${Log}/httpd",
+                       "HttpdLogFiles" : "${HttpdLog}/*",
+                       "HttpdEtcIn"    : "${EtcIn}/httpd",
+                       "HttpdEtc"      : "${Etc}/httpd",
+                       "HttpdConf"     : "${Etc}/httpd/httpd.conf",
+                       "Prog"          : "${HttpdDir}/bin/httpd",
+                       "Args"          : [ "-d", "${HttpdEtc}", "-f" "${HttpdConf}", "-D", "FOREGROUND" ],
+                       "Cmd"           : [ "${Prog}", "${Args}" ],
+                       "IbEtc"         : "${EtcIn}/ironbee",
+                       "PreCmds"       : { "HTTPD" : ["make", "-C", "${HttpdEtcIn}"],
+                                           "IB"  : ["make", "-C", "${IbEtc}"], },
                        }
-        self._parser = argparse.ArgumentParser( description="Run ATS with IronBee",
-                                                prog="ib-ats" )
+        self._parser = argparse.ArgumentParser( description="Run Apache httpd with IronBee",
+                                                prog="ib-httpd" )
 
 
     def ParserSetup( self ) :
         self._parser.add_argument( "--default",
                                    action="store_const", dest="tool", default="none",
                                    const="None",
-                                   help="Run ATS natively" )
+                                   help="Run httpd natively" )
         self._parser.add_argument( "--gdb",
                                    action="store_const", dest="tool", const="gdb",
-                                   help="Run ATS under gdb" )
+                                   help="Run httpd under gdb" )
         self._parser.add_argument( "--strace",
                                    action="store_const", dest="tool",
                                    const="strace",
-                                   help="Run ATS under strace" )
+                                   help="Run httpd under strace" )
         self._parser.add_argument( "--valgrind",
                                    action="store_const", dest="tool",
                                    const="valgrind",
-                                   help="Run ATS under valgrind (memtool)" )
+                                   help="Run httpd under valgrind (memtool)" )
         self._parser.add_argument( "--helgrind",
                                    action="store_const", dest="tool",
                                    const="helgrind",
-                                   help="Run ATS under helgrind")
+                                   help="Run httpd under helgrind")
 
         self._parser.add_argument( "--append-tool-arg", "-a",
                                    action="append", dest="tool_args", default=[],
@@ -111,7 +115,7 @@ class Main( object ) :
 
         self._parser.add_argument( "--clean", "-c",
                                    action="store_true", dest="clean", default=False,
-                                   help="Clean log files before starting ATS")
+                                   help="Clean log files before starting httpd")
 
         self._parser.set_defaults( defs = [] )
         class StrAction(argparse.Action):
@@ -153,12 +157,20 @@ class Main( object ) :
             self._defs[name] = value
         self._tool = self._CmdPrefixes[self._args.tool]
         if self._args.clean :
-            self._defs["PreCmds"]["Clean"] = [ "/bin/rm", "${AtsLogFiles}" ]
+            files = [ ]
+            for expanded in self.Expand( ("${HttpdLogFiles}",) ) :
+                files += glob.glob(expanded)
+            if len(files) :
+                self._defs["PreCmds"]["Clean"] = [ "/bin/rm" ] + files
         if self._args.output is not None :
             self._defs["Output"] = self._args.output
 
     def Expand( self, args ) :
         loops = 0
+        if type(args) == tuple :
+            args = list(args)
+        elif type(args) != list :
+            args = [ args ]
         if self._args.verbose >= 2 :
             print "Expanding:", args
             print "  using:", self._defs
@@ -195,7 +207,7 @@ class Main( object ) :
         if item is None :
             return None
         elif type(item) == str :
-            return self.ExpandStr( item )
+           return self.ExpandStr( item )
         else :
             return self.Expand( item )
 
@@ -213,7 +225,7 @@ class Main( object ) :
                 print "Exit status is", status
 
 
-    def RunATS( self ) :
+    def RunHttpd( self ) :
         for key,value in self._tool.Defs.items() :
             if key not in self._defs :
                 self._defs[key] = value
@@ -221,6 +233,7 @@ class Main( object ) :
         tmp += self._tool.Prefix
         tmp += self._args.tool_args
         tmp += self._defs["Cmd"]
+        tmp += self._tool.Args
         cmd = self.Expand( tmp )
 
         if not self._args.execute :
@@ -231,7 +244,7 @@ class Main( object ) :
         if outfile is not None :
             outfile = self.ExpandStr( outfile )
 
-        if self._args.verbose :
+        if not self._args.quiet :
             print "Running:", cmd
             if outfile is not None :
                 print "Output ->", outfile
@@ -266,7 +279,7 @@ class Main( object ) :
             if type(value) == str :
                 expanded = self.ExpandStr(value)
             elif type(value) == int :
-                expanded = value
+                expan
             elif type(value) in (list, tuple) :
                 expanded = [ self.ExpandItem(v) for v in value ]
             elif type(value) == dict :
@@ -285,7 +298,7 @@ class Main( object ) :
             self.PrintTable( )
             sys.exit(0)
         self.RunPre( )
-        self.RunATS( )
+        self.RunHttpd( )
 
 main = Main( )
 main.Main( )

@@ -1,15 +1,13 @@
 #!/bin/sh
 DEVEL=${HOME}/devel
+BUILD=${DEVEL}/build
 ETC=${DEVEL}/etc
 DATA=${DEVEL}/data
 VAR=${DEVEL}/var
 TMP=${DEVEL}/tmp
 
-if test "$IBROOT" = "" ; then
-  IBROOT=${DEVEL}/ib-gcc
-fi
 if test "$IBBUILD" = "" ; then
-  IBBUILD="${IBROOT}/build"
+  IBBUILD="${BUILD}/gcc-std"
 fi
 
 ETC_IB=${ETC}/ironbee
@@ -32,12 +30,14 @@ RSPFILE=${DATA}/skip2/rsp-0319/03198-40315-0000.raw
 # REQFILE=${TMP}/segv/15008.req
 # RSPFILE=${TMP}/segv/15008.rsp
 
-#REQFILE=${TMP}/skipfishVmoth.pcap-03198-192.168.2.3-40315-192.168.2.6-80.request.0000.raw
 
-REMOTE_IP=128.105.121.53
+#REMOTE_IP=128.105.121.53
+REMOTE_IP=127.0.1.1
 #REMOTE_PORT=80
 #LOCAL_IP=192.168.1.1
 #LOCAL_PORT=1234
+HOST=site1.nick.com
+REFERER=-
 
 if [ "${REMOTE_IP}" != "" ] ; then
   ADDR_ARGS="${ADDR_ARGS} --remote-ip ${REMOTE_IP}"
@@ -51,13 +51,22 @@ fi
 if [ "${LOCAL_PORT}" != "" ] ; then
   ADDR_ARGS="${ADDR_ARGS} --local-port ${LOCAL_PORT}"
 fi
+if [ "${HOST}" != "" ] ; then
+  HEADERS="${HEADERS} --request-header Host:${HOST}"
+fi
+if [ "${REFERER}" == "-" ] ; then
+  HEADERS="${HEADERS} --request-header -Referer:"
+elif [ "${REFERER}" != "" ] ; then
+  HEADERS="${HEADERS} --request-header Referer:${REFERER}"
+fi
 
 CONF="--config ${ETC_IB}/cli.conf"
 REQ="--request-file ${REQFILE}"
 RSP="--response-file ${RSPFILE}"
-MISC_ARGS="--dump tx-full"
+MISC_ARGS="--dump all ${HEADERS}"
+#MISC_ARGS="--dump tx-full ${HEADERS}"
 CLI_ARGS="${CONF} ${REQ} ${RSP} ${ADDR_ARGS} ${MISC_ARGS}"
-CLI="${IBBUILD}/cli/.libs/ibcli"
+CLI="${IBBUILD}/install/bin/ibcli"
 
 
 OUT=${LOG}/ibcli.out

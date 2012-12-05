@@ -18,7 +18,7 @@ for root, dirs, files in os.walk( ".", topdown=True ) :
             orig = open(full, "r").readlines()
         except IOError as e:
             print e
-            sys.exit(1)
+            continue
 
         diffs = 0
         new = []
@@ -43,7 +43,3 @@ for root, dirs, files in os.walk( ".", topdown=True ) :
                 print full
             except IOError as e :
                 print e
-                sys.exit(1)
-
-
-
