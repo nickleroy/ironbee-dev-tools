@@ -2,15 +2,18 @@
 DEVEL=${HOME}/devel
 BUILD=${DEVEL}/build
 ETC=${DEVEL}/etc
+ETC_IB=${ETC}/ironbee
 DATA=${DEVEL}/data
 VAR=${DEVEL}/var
 TMP=${DEVEL}/tmp
+ETC_IN=${DEVEL}/etc.in
+ETC_IN_IB=${ETC_IN}/ironbee
 
 if test "$IBBUILD" = "" ; then
   IBBUILD="${BUILD}/gcc-std"
 fi
 
-ETC_IB=${ETC}/ironbee
+
 DATE=`date '+%Y%m%d.%H%M%S'`
 LOG=${VAR}/log/ironbee
 LOGBACK=${VAR}/log/ironbee.bak
@@ -75,7 +78,7 @@ IBLOG=${LOG}/ibcli.log
 mkdir ${LOGBACK}
 mv ${LOG} ${LOGBACK}/ironbee-${DATE}
 mkdir ${LOG}
-make -C ${ETC_IB}.in
+make -C ${ETC_IN_IB}
 CMD="${CLI} ${CLI_ARGS}"
 echo ${CMD} "> ${OUT}"
 ${CMD} > ${OUT} 2>${ERR}
