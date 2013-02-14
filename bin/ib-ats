@@ -67,10 +67,11 @@ class Main( object ) :
                        "Prog"        : "${AtsDir}/bin/traffic_server",
                        "Trace"       : 'http.*|dns.*|http_hdrs|sdk|ironbee',
                        "Args"        : [ '-T${Trace}' ],
+                       "MakeArgs"    : [ ],
                        "Cmd"         : [ "${Prog}", "${Args}" ],
                        "IbEtc"       : "${EtcIn}/ironbee",
-                       "PreCmds"     : { "ATS" : ["make", "-C", "${AtsEtcIn}"],
-                                         "IB"  : ["make", "-C", "${IbEtc}"], },
+                       "PreCmds"     : { "ATS" : ["make", "-C", "${AtsEtcIn}", "${MakeArgs}"],
+                                         "IB"  : ["make", "-C", "${IbEtc}", "${MakeArgs}"], },
                        }
         self._parser = argparse.ArgumentParser( description="Run ATS with IronBee",
                                                 prog="ib-ats" )
@@ -100,6 +101,10 @@ class Main( object ) :
         self._parser.add_argument( "--append-tool-arg", "-a",
                                    action="append", dest="tool_args", default=[],
                                    help="Add tool-specific argument" )
+
+        self._parser.add_argument( "--force-make", "-f",
+                                   action="store_true", dest="force_make", default=False,
+                                   help="Force execution of make in etc directories")
 
         self._parser.add_argument( "--out", "-o",
                                    dest="output", type=argparse.FileType('w'), default=None,
@@ -156,6 +161,8 @@ class Main( object ) :
             self._defs["PreCmds"]["Clean"] = [ "/bin/rm", "${AtsLogFiles}" ]
         if self._args.output is not None :
             self._defs["Output"] = self._args.output
+        if self._args.force_make :
+            self._defs["MakeArgs"].append("-B")
 
     def Expand( self, args ) :
         loops = 0
