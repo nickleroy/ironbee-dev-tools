@@ -23,148 +23,27 @@ import glob
 import subprocess
 import argparse
 
-class Tool( object ) :
-    def __init__( self, name, prefix=None, tool_args=None, prog_args=None, defs=None ) :
-        self._name = name
-        self._prefix = self._List( prefix )
-        self._tool_args = self._List( tool_args )
-        self._prog_args = self._List( prog_args )
-        self._defs = defs if defs is not None else { }
-        if "ToolName" not in self._defs :
-            self._defs["ToolName"] = name
-        for p in self._prefix :
-            if "${ToolOut}" in p :
-                self._defs["ToolOut"] = "ats." + name + ".${Run}"
-                break
-        self._defs["DefaultOut"] = "ats." + name + ".out.${Run}"
-
-    @staticmethod
-    def _List( o ) :
-        if o is None :
-            return ( )
-        elif type(o) in (list, tuple) :
-            return o
-        else :
-            return (o,)
-
-    Defs     = property( lambda self : self._defs )
-    def Prefix( self ) :
-        return self._prefix
-    def ToolArgs( self, args ) :
-        return list(args) + list(self._tool_args)
-    def ProgArgs( self, args ) :
-        return list(args) + list(self._prog_args)
-    ToolName = property( lambda self : self._defs["ToolName"] )
-    ToolOut  = property( lambda self : self._defs.get("ToolOut", None) )
+from ib_tools import *
 
 
-class Main( object ) :
-    valgrind = ( "${ToolName}", "--tool=${SubTool}", "-v", "-v", "--log-file=${ToolOut}" )
-    _CmdPrefixes = {
-        "none"     : Tool("none" ),
-        "gdb"      : Tool("gdb",      prefix="${ToolName}", tool_args="--args", prog_args="-X"),
-        "strace"   : Tool("strace",   prefix=("${ToolName}", "-o", "${ToolOut}") ),
-        "valgrind" : Tool("valgrind", prefix=valgrind, defs={"SubTool":"memcheck"}),
-        "helgrind" : Tool("helgrind", prefix=valgrind, defs={"SubTool":"helgrind"}),
+class Main( ToolMain ) :
+    _httpd_defs = {
+        "HttpdVer"      : "2.4.3",
+        "HttpdDir"      : os.path.join(os.environ["EXT_INSTALL"], "httpd-${HttpdVer}"),
+        "HttpdLog"      : "${Log}/httpd",
+        "HttpdLogFiles" : "${HttpdLog}/*",
+        "HttpdEtcIn"    : "${EtcIn}/httpd",
+        "HttpdEtc"      : "${Etc}/httpd",
+        "HttpdConf"     : "${Etc}/httpd/httpd.conf",
+        "Prog"          : "${HttpdDir}/bin/httpd",
+        "Args"          : [ "-d", "${HttpdEtc}", "-f" "${HttpdConf}", "-D", "FOREGROUND" ],
+        "Cmd"           : [ "${Prog}", "${Args}" ],
+        "PreCmds"       : { "HTTPD" : ["make", "-C", "${HttpdEtcIn}", "${MakeArgs}"],
+                            "IB"  : ["make", "-C", "${IbEtc}", "${MakeArgs}"], },
         }
 
     def __init__( self ) :
-        self._defs = { "PID"           : os.getpid(),
-                       "Run"           : "${PID}",
-                       "Devel"         : os.environ["QYLS_DEVEL"],
-                       "Var"           : os.environ.get("QYLS_VAR", "${Devel}/var"),
-                       "Log"           : "${Var}/log",
-                       "Etc"           : os.environ.get("QYLS_ETC", "${Devel}/etc"),
-                       "EtcIn"         : os.environ.get("QYLS_ETC_IN", "${Devel}/etc.in"),
-                       "HttpdVer"      : "2.4.3",
-                       "HttpdDir"      : os.path.join(os.environ["EXT_INSTALL"], "httpd-${HttpdVer}"),
-                       "HttpdLog"      : "${Log}/httpd",
-                       "HttpdLogFiles" : "${HttpdLog}/*",
-                       "HttpdEtcIn"    : "${EtcIn}/httpd",
-                       "HttpdEtc"      : "${Etc}/httpd",
-                       "HttpdConf"     : "${Etc}/httpd/httpd.conf",
-                       "Prog"          : "${HttpdDir}/bin/httpd",
-                       "Args"          : [ "-d", "${HttpdEtc}", "-f" "${HttpdConf}", "-D", "FOREGROUND" ],
-                       "MakeArgs"      : [ ],
-                       "Cmd"           : [ "${Prog}", "${Args}" ],
-                       "IbEtc"         : "${EtcIn}/ironbee",
-                       "PreCmds"       : { "HTTPD" : ["make", "-C", "${HttpdEtcIn}", "${MakeArgs}"],
-                                           "IB"  : ["make", "-C", "${IbEtc}", "${MakeArgs}"], },
-                       }
-        self._parser = argparse.ArgumentParser( description="Run Apache httpd with IronBee",
-                                                prog="ib-apache" )
-
-
-    def ParserSetup( self ) :
-        self._parser.add_argument( "--default",
-                                   action="store_const", dest="tool", default="none",
-                                   const="None",
-                                   help="Run httpd natively" )
-        self._parser.add_argument( "--gdb",
-                                   action="store_const", dest="tool", const="gdb",
-                                   help="Run httpd under gdb" )
-        self._parser.add_argument( "--strace",
-                                   action="store_const", dest="tool",
-                                   const="strace",
-                                   help="Run httpd under strace" )
-        self._parser.add_argument( "--valgrind",
-                                   action="store_const", dest="tool",
-                                   const="valgrind",
-                                   help="Run httpd under valgrind (memtool)" )
-        self._parser.add_argument( "--helgrind",
-                                   action="store_const", dest="tool",
-                                   const="helgrind",
-                                   help="Run httpd under helgrind")
-
-        self._parser.add_argument( "--force-make", "-f",
-                                   action="store_true", dest="force_make", default=False,
-                                   help="Force execution of make in etc directories")
-
-        self._parser.add_argument( "--out", "-o",
-                                   dest="output", type=argparse.FileType('w'), default=None,
-                                   help='Specify output file')
-        self._parser.add_argument( "--default-out", "--do",
-                                   action="store_const", dest="output",
-                                   const="${DefaultOut}",
-                                   help="Use default stdout file" )
-
-        self._parser.add_argument( "--clean", "-c",
-                                   action="store_true", dest="clean", default=False,
-                                   help="Clean log files before starting httpd")
-
-        self._parser.set_defaults( defs = [] )
-        class StrAction(argparse.Action):
-            def __call__(self, parser, namespace, values, option_string=None):
-                for s in values :
-                    try :
-                        name, value = s.split( '=', 1 )
-                        namespace.defs.append( (name.strip(), value) )
-                    except ValueError :
-                        parser.error( "Invalid definition '"+s+"'" )
-        self._parser.add_argument( "strings", metavar='n=v', type=str,
-                                   action=StrAction, nargs='*',
-                                   help="Specify name=value definitions" )
-
-        self._parser.add_argument( "--print-defs", "-p",
-                                   action="store_const", const="print",
-                                   dest="print_mode", default=None,
-                                   help="Print definition table and exit." )
-        self._parser.add_argument( "--print-expanded", "-pe",
-                                   action="store_const", dest="print_mode", const="expand",
-                                   help="Print expanded definition table and exit." )
-
-        self._parser.add_argument( "--execute",
-                                   action="store_true", dest="execute", default=True,
-                                   help="Enable execution <default>" )
-        self._parser.add_argument( "-n", "--no-execute",
-                                   action="store_false", dest="execute",
-                                   help="Disable execution (for test/debug)" )
-        self._parser.add_argument( "-v", "--verbose",
-                                   action="count", dest="verbose", default=0,
-                                   help="Increment verbosity level" )
-        self._parser.add_argument( "-q", "--quiet",
-                                   action="store_true", dest="quiet", default=False,
-                                   help="be vewwy quiet (I'm hunting wabbits)" )
+        ToolMain.__init__( self, "Apache HTTPd", "Httpd", self._httpd_defs )
 
     def Parse( self ) :
         self._args, tool_args = self._parser.parse_known_args()
@@ -180,6 +59,7 @@ class Main( object ) :
                 self._defs["PreCmds"]["Clean"] = [ "/bin/rm" ] + files
         if self._args.force_make :
             self._defs["MakeArgs"].append("-B")
+        self._tool.SetVerbose( self._args.verbose )
 
     def Expand( self, args ) :
         loops = 0

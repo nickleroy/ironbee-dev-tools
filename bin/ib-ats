@@ -19,6 +19,7 @@ import re
 import os
 import sys
 import copy
+import glob
 import subprocess
 import argparse
 
@@ -27,6 +28,7 @@ class Tool( object ) :
         self._name = name
         self._prefix = prefix if prefix is not None else ( )
         self._defs = defs if defs is not None else { }
+        self._verbose = 0
         if "ToolName" not in self._defs :
             self._defs["ToolName"] = name
         for p in self._prefix :
@@ -34,21 +36,35 @@ class Tool( object ) :
                 self._defs["ToolOut"] = "ats." + name + ".${Run}"
                 break
         self._defs["DefaultOut"] = "ats." + name + ".out.${Run}"
+    def SetVerbose( self, v ) :
+        self._verbose = v
 
     Prefix   = property( lambda self : self._prefix )
     Defs     = property( lambda self : self._defs )
     ToolName = property( lambda self : self._defs["ToolName"] )
     ToolOut  = property( lambda self : self._defs.get("ToolOut", None) )
+    Verbose  = property( lambda self : self._verbose )
+
+class Valgrind( Tool ) :
+    _valgrind_prefix = ( "${ToolName}",
+                         "--tool=${SubTool}",
+                         "--log-file=${ToolOut}",
+                         "--leak-check=full" )
+    def __init__( self, name, defs ) :
+        Tool.__init__( self, name, self._valgrind_prefix, defs )
+    def _GetPrefix( self ) :
+        prefix = list(self._prefix) + [ "-v" for i in range(self._verbose) ]
+        return prefix
+    Prefix = property( _GetPrefix )
 
 
 class Main( object ) :
-    valgrind = ( "${ToolName}", "--tool=${SubTool}", "-v", "-v", "--log-file=${ToolOut}" )
     _CmdPrefixes = {
         "none"     : Tool("none" ),
         "gdb"      : Tool("gdb",      prefix=("${ToolName}", "--args") ),
         "strace"   : Tool("strace",   prefix=("${ToolName}", "-o", "${ToolOut}") ),
-        "valgrind" : Tool("valgrind", prefix=valgrind, defs={"SubTool":"memcheck"}),
-        "helgrind" : Tool("helgrind", prefix=valgrind, defs={"SubTool":"helgrind"}),
+        "valgrind" : Valgrind("valgrind", defs={"SubTool":"memcheck"}),
+        "helgrind" : Valgrind("helgrind", defs={"SubTool":"helgrind"}),
         }
 
     def __init__( self ) :
@@ -65,7 +81,7 @@ class Main( object ) :
                        "AtsEtcIn"    : "${EtcIn}/trafficserver/cur",
                        "AtsEtc"      : "${Etc}/trafficserver",
                        "Prog"        : "${AtsDir}/bin/traffic_server",
-                       "Trace"       : 'http.*|dns.*|http_hdrs|sdk|ironbee',
+                       "Trace"       : 'http.*|dns.*|http_hdrs|sdk|ironbee|libloader',
                        "Args"        : [ '-T${Trace}' ],
                        "Cmd"         : [ "${Prog}", "${Args}" ],
                        "IbEtc"       : "${EtcIn}/ironbee",
@@ -147,15 +163,23 @@ class Main( object ) :
                                    action="store_true", dest="quiet", default=False,
                                    help="be vewwy quiet (I'm hunting wabbits)" )
 
+    def SetPreClean( self, defs ) :
+        files = [ ]
+        for expanded in self.Expand( defs ) :
+            files += glob.glob(expanded)
+        if len(files) :
+            self._defs["PreCmds"]["Clean"] = [ "/bin/rm" ] + files
+
     def Parse( self ) :
         self._args = self._parser.parse_args()
         for name,value in self._args.defs :
             self._defs[name] = value
         self._tool = self._CmdPrefixes[self._args.tool]
         if self._args.clean :
-            self._defs["PreCmds"]["Clean"] = [ "/bin/rm", "${AtsLogFiles}" ]
+            self.SetPreClean( ("${AtsLogFiles}",) )
         if self._args.output is not None :
             self._defs["Output"] = self._args.output
+        self._tool.SetVerbose( self._args.verbose )
 
     def Expand( self, args ) :
         loops = 0
