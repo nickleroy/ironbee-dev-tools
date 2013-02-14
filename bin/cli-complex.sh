@@ -28,8 +28,8 @@ RSPFILE=${DATA}/skip2/rsp-0319/03198-40315-0000.raw
 # RSPFILE=${DATA}/brian/2012-06-14.rsp
 # REQFILE=${DATA}/tmp/2012-07-05.req
 # RSPFILE=${DATA}/tmp/2012-07-05.rsp
-# REQFILE=${DATA}/http-0.9-req.txt
-# RSPFILE=${DATA}/http-0.9-rsp.txt
+# REQFILE=${DATA}/http-0.9-3-req.txt
+# RSPFILE=${DATA}/http-0.9-3-rsp.txt
 # REQFILE=${TMP}/segv/15008.req
 # RSPFILE=${TMP}/segv/15008.rsp
 
