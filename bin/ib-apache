@@ -20,7 +20,6 @@ import sys
 
 from ibtool import *
 
-
 class Main( IbToolMain ) :
     _httpd_defs = {
         "HttpdVer"      : "2.4.3",

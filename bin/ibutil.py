@@ -50,11 +50,16 @@ class IbDict( dict ):
 class IbExpander( object ) :
     def __init__( self, defs ) :
         assert isinstance(defs, dict)
-        self._defs = defs
+        self._defs = defs.copy()
+        self._verbose = 0
+
+    def _getVerbose( self ) : return self._verbose
+    def _setVerbose( self, v ) : self._verbose = v
+    Verbose = property(_getVerbose, _setVerbose )
 
     def ExpandList( self, args ) :
         loops = 0
-        if self._options.verbose >= 2 :
+        if self._verbose >= 2 :
             print "Expanding:", args
             print "  using:", self._defs
         while True :
@@ -64,17 +69,17 @@ class IbExpander( object ) :
                     s = '${'+key+'}'
                     c = copy.copy(args)
                     if arg == s  and  type(value) == list :
-                        expanded = self.Expand(value)
+                        expanded = self.ExpandList(value)
                         args = args[:n] + expanded + args[n+1:]
-                        if self._options.verbose >= 3 :
+                        if self._verbose >= 3 :
                             print c, key+"="+str(expanded), "->", args
                         continue
                     if s in arg :
                         args[n] = arg.replace(s, str(value))
-                        if self._options.verbose >= 3 :
+                        if self._verbose >= 3 :
                             print c, key+"="+str(value), "->", args
             if initial == args  or  loops > 10 :
-                if self._options.verbose >= 2 :
+                if self._verbose >= 2 :
                     print "Expanded:", args
                 return args
             loops += 1
@@ -82,17 +87,126 @@ class IbExpander( object ) :
     def ExpandStr( self, s ) :
         if s is None :
             return None
-        expanded = self.Expand( [s] )
-        assert len(expanded) == 1
-        return expanded[0]
-        
-    def Main( self ) :
-        self.ParserSetup( )
-        self.Parse( )
-        self.RunATS( )
+        expanded = self.ExpandList( [s] )
+        return str(expanded)
 
-main = Main( )
-main.Main( )
+    def ExpandItem( self, item ) :
+        if item is None :
+            return None
+        elif type(item) == str :
+           return self.ExpandStr( item )
+        else :
+            return self.ExpandList( item )
+
+    def Lookup( self, name ) :
+        return self._defs.get(name, None)
+
+    def Set( self, name, value, over=True ) :
+        if name not in self._defs  or  over :
+            self._defs[name] = value
+
+    def SetDict( self, d, over=True ) :
+        assert type(d) is dict
+        for name,value in d.items() :
+            self.Set( name, value, over )
+
+    def Append( self, name, value ) :
+        t = type(self._defs.get(name, None))
+        if t is list :
+            if type(value) is list :
+                self._defs[name] += value
+            else :
+                self._defs[name].append(value)
+        elif t is dict :
+            assert type(value) is dict
+            for k,v in value :
+                self._defs[name][k] = v
+        elif t is str :
+            self._defs[name] += str(value)
+        else :
+            assert 0, "Don't know how to append to "+str(t)
+
+    def Dump( self, expand ) :
+        print self._defs
+        for name, value in self._defs.items( ) :
+            if not expand :
+                print name, "=", value
+                continue
+
+            expanded = value
+            if type(value) == str :
+                expanded = self.ExpandStr(value)
+            elif type(value) == int :
+                pass
+            elif type(value) in (list, tuple) :
+                expanded = [ self.ExpandItem(v) for v in value ]
+            elif type(value) == dict :
+                expanded = { }
+                for n,v in value.items( ) :
+                    expanded[n] = self.ExpandItem(v)
+            else :
+                print >>sys.stderr, "I don't know how to expand", \
+                    name, "with type", type(value)
+            print name, "=", expanded
+
+
+if __name__ == "__main__" :
+    def Defs( env ) :
+        return {
+            "PID"       : os.getpid(),
+            "Run"       : "${PID}",
+            "Home"      : env["HOME"],
+            "Devel"     : env.get("DEVEL", "${Home}/devel"),
+            "PrjDevel"  : "${Devel}/project",
+            "Build"     : env.get("BUILD", "${Devel}/build"),
+            "PrjBuild"  : "${Build}/project",
+            "Local"     : env.get("LOCAL", "${Devel}"),
+            "ETC"       : env.get("ETC",   "${Devel}/etc"),
+            "Var"       : env.get("VAR",   "${Local}/var"),
+            "Log"       : env.get("LOG",   "${Var}/log"),
+        }.copy()
+
+    env = {"HOME":"/home/nick"}
+    exp = IbExpander( Defs(env) )
+    exp.Verbose = 2
+    s = exp.ExpandStr("${Home}")
+    assert s == "/home/nick", s
+    s = exp.ExpandStr("${Log}")
+    assert s == "/home/nick/devel/var/log", s
+    s = exp.ExpandStr("${PrjDevel}")
+    assert s == "/home/nick/devel/project", s
+    s = exp.ExpandStr("${PrjBuild}")
+    assert s == "/home/nick/devel/build/project", s
+
+    env = {"HOME":"/home/nick", "DEVEL":"/local/devel/nick"}
+    exp = IbExpander( Defs(env) )
+    exp.Verbose = 2
+    s = exp.ExpandStr("${Home}")
+    assert s == "/home/nick", s
+    s = exp.ExpandStr("${Log}")
+    assert s == "/local/devel/nick/var/log", s
+    s = exp.ExpandStr("${PrjDevel}")
+    assert s == "/local/devel/nick/project", s
+    s = exp.ExpandStr("${PrjBuild}")
+    assert s == "/local/devel/nick/build/project", s
+
+    env = {
+        "HOME":"/home/nick",
+        "LOCAL":"/local/nick",
+        "BUILD":"/build/nick"}
+    exp = IbExpander( Defs(env) )
+    exp.Verbose = 2
+    s = exp.ExpandStr("${Home}")
+    assert s == "/home/nick", s
+    s = exp.ExpandStr("${Build}")
+    assert s == "/build/nick", s
+    s = exp.ExpandStr("${Log}")
+    assert s == "/local/nick/var/log", s
+    s = exp.ExpandStr("${PrjDevel}")
+    assert s == "/home/nick/devel/project", s
+    s = exp.ExpandStr("${PrjBuild}")
+    assert s == "/build/nick/project", s
+
 
 ### Local Variables: ***
 ### py-indent-offset:4 ***
