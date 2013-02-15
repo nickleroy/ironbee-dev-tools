@@ -1,13 +1,11 @@
 #!/bin/sh
-DEVEL=${HOME}/devel
-BUILD=${DEVEL}/build
-ETC=${DEVEL}/etc
-ETC_IB=${ETC}/ironbee
-DATA=${DEVEL}/data
-VAR=${DEVEL}/var
-TMP=${DEVEL}/tmp
-ETC_IN=${DEVEL}/etc.in
-ETC_IN_IB=${ETC_IN}/ironbee
+DEVEL=${QYLS_DEVEL}
+BUILD=${QYLS_BUILD}
+ETC=${QYLS_ETC}
+ETC_IN=${QYLS_ETC_IN}
+DATA=${QYLS_DATA}
+VAR=${QYLS_VAR}
+TMP=${QYLS_DEVEL}/tmp
 
 if test "$IBBUILD" = "" ; then
   IBBUILD="${BUILD}/gcc-std"
@@ -63,7 +61,7 @@ elif [ "${REFERER}" != "" ] ; then
   HEADERS="${HEADERS} --request-header Referer:${REFERER}"
 fi
 
-CONF="--config ${ETC_IB}/cli.conf"
+CONF="--config ${ETC}/ironbee/cli.conf"
 REQ="--request-file ${REQFILE}"
 RSP="--response-file ${RSPFILE}"
 MISC_ARGS="--dump all ${HEADERS}"
@@ -78,7 +76,7 @@ IBLOG=${LOG}/ibcli.log
 mkdir ${LOGBACK}
 mv ${LOG} ${LOGBACK}/ironbee-${DATE}
 mkdir ${LOG}
-make -C ${ETC_IN_IB}
+make -C ${ETC_IN}/ironbee
 CMD="${CLI} ${CLI_ARGS}"
 echo ${CMD} "> ${OUT}"
 ${CMD} > ${OUT} 2>${ERR}
