@@ -22,8 +22,9 @@ import copy
 import glob
 import subprocess
 import argparse
+from ibutil import *
 
-class Tool( object ) :
+class _Tool( object ) :
     def __init__( self, name, prefix=None, tool_args=None, prog_args=None, defs=None ) :
         self._name = name
         self._prefix = self._List( prefix )
@@ -35,9 +36,9 @@ class Tool( object ) :
             self._defs["ToolName"] = name
         for p in self._prefix :
             if "${ToolOut}" in p :
-                self._defs["ToolOut"] = "httpd." + name + ".${Run}"
+                self._defs["ToolOut"] = "${NameLower}." + name + ".${Run}"
                 break
-        self._defs["DefaultOut"] = "httpd." + name + ".out.${Run}"
+        self._defs["DefaultOut"] = "${NameLower}." + name + ".out.${Run}"
     def SetVerbose( self, v ) :
         self._verbose = v
 
@@ -62,38 +63,40 @@ class Tool( object ) :
         return list(args) + list(self._prog_args)
 
 
-class ToolGdb( Tool ) :
+class _ToolGdb( _Tool ) :
     _gdb_prefix = ("${ToolName}",)
     def __init__( self, name ) :
-        Tool.__init__( self, name, prefix=self._gdb_prefix, tool_args="--args", prog_args="-X" )
+        _Tool.__init__( self, name,
+                        prefix=self._gdb_prefix,
+                        tool_args="--args", prog_args="-X" )
 
-class ToolStrace( Tool ) :
+class _ToolStrace( _Tool ) :
     _strace_prefix = ("${ToolName}",
                       "-o", "${ToolOut}")
     def __init__( self, name ) :
-        Tool.__init__( self, name, prefix=self._strace_prefix )
+        _Tool.__init__( self, name, prefix=self._strace_prefix )
 
-class ToolValgrind( Tool ) :
+class _ToolValgrind( _Tool ) :
     _valgrind_prefix = ( "${ToolName}",
                          "--tool=${SubTool}",
                          "--log-file=${ToolOut}",
                          "--leak-check=full" )
     def __init__( self, name, defs ) :
-        Tool.__init__( self, name, prefix=self._valgrind_prefix, defs=defs )
+        _Tool.__init__( self, name, prefix=self._valgrind_prefix, defs=defs )
     def Prefix( self ) :
         prefix = list(self._prefix) + [ "-v" for i in range(self._verbose) ]
         return prefix
 
-class ToolMain( object ) :
-    _CmdPrefixes = {
-        "none"     : Tool( "none" ),
-        "gdb"      : ToolGdb( "gdb" ),
-        "strace"   : ToolStrace( "strace" ),
-        "valgrind" : ToolValgrind("valgrind", defs={"SubTool":"memcheck"}),
-        "helgrind" : ToolValgrind("helgrind", defs={"SubTool":"helgrind"}),
-        }
+class IbToolMain( object ) :
+    _tools = {
+        "none"     : _Tool( "none" ),
+        "gdb"      : _ToolGdb( "gdb" ),
+        "strace"   : _ToolStrace( "strace" ),
+        "valgrind" : _ToolValgrind("valgrind", defs={"SubTool":"memcheck"}),
+        "helgrind" : _ToolValgrind("helgrind", defs={"SubTool":"helgrind"}),
+    }
 
-    self._defs = {
+    _global_defs = {
         "PID"           : os.getpid(),
         "Run"           : "${PID}",
         "Devel"         : os.environ["QYLS_DEVEL"],
@@ -104,19 +107,25 @@ class ToolMain( object ) :
         "MakeArgs"      : [ ],
         "Cmd"           : [ "${Prog}", "${Args}" ],
         "IbEtc"         : "${EtcIn}/ironbee",
-        }
+        "PreCmds"       : [ ["make", "-C", "${IbEtc}", "${MakeArgs}"] ],
+    }
 
-    def __init__( self, name, defs ) :
+    def __init__( self, name, prefix, defs ) :
         self._name = name
-        for k,v in defs.items() :
-            self._defs[k] = v
+        self._prefix = prefix
+        self._defs = IbExpander( self._global_defs )
+        self._defs.SetDict( defs )
+        self._defs.Set( "Name", prefix)
+        self._defs.Set( "NameLower", prefix.lower())
+        self._defs.Set( "NameUpper", prefix.upper())
+
 
     def ParserSetup( self ) :
-        self._parser = argparse.ArgumentParser( description="Run " + self._name " with IronBee",
+        self._parser = argparse.ArgumentParser( description="Run "+self._name+" with IronBee",
                                                 prog=os.path.basename(sys.argv[0]) )
         self._parser.add_argument( "--default",
                                    action="store_const", dest="tool", default="none",
-                                   const="None",
+                                   const="none",
                                    help="Run %s natively" % (self._name) )
         self._parser.add_argument( "--gdb",
                                    action="store_const", dest="tool", const="gdb",
@@ -163,13 +172,13 @@ class ToolMain( object ) :
                                    action=StrAction, nargs='*',
                                    help="Specify name=value definitions" )
 
-        self._parser.add_argument( "--print-defs", "-p",
-                                   action="store_const", const="print",
-                                   dest="print_mode", default=None,
-                                   help="Print definition table and exit." )
-        self._parser.add_argument( "--print-expanded", "-pe",
-                                   action="store_const", dest="print_mode", const="expand",
-                                   help="Print expanded definition table and exit." )
+        self._parser.add_argument( "--dump-defs", "-d",
+                                   action="store_const", const="dump",
+                                   dest="dump_mode", default=None,
+                                   help="Dump definition table and exit." )
+        self._parser.add_argument( "--dump-expanded", "-de",
+                                   action="store_const", dest="dump_mode", const="expand",
+                                   help="Dump expanded definition table and exit." )
 
         self._parser.add_argument( "--execute",
                                    action="store_true", dest="execute", default=True,
@@ -184,6 +193,98 @@ class ToolMain( object ) :
                                    action="store_true", dest="quiet", default=False,
                                    help="be vewwy quiet (I'm hunting wabbits)" )
 
+    def Parse( self ) :
+        self._args, tool_args = self._parser.parse_known_args()
+        self._args.tool_args = tool_args
+
+        for name,value in self._args.defs :
+            self._defs.Set( name, value )
+
+        self._tool = self._tools[self._args.tool]
+        self._defs.SetDict( self._tool.Defs, over=False )
+
+        if self._args.clean :
+            files = [ ]
+            varname = "${"+self._prefix+"LogFiles}"
+            for expanded in self._defs.ExpandStr( varname ) :
+                files += glob.glob(expanded)
+            if len(files) :
+                self._defs.Append("PreCmds", [ "/bin/rm" ] + files )
+        if self._args.force_make :
+            self._defs.Append("MakeArgs", "-B")
+        self._tool.SetVerbose( self._args.verbose )
+
+
+    def DumpTable( self ) :
+        if self._args.dump_mode is None :
+            return
+        self._defs.Dump( self._args.dump_mode == "expand" )
+        sys.exit(0)
+
+    def RunPre( self ) :
+        for cmd in self._defs.Lookup("PreCmds") :
+            cmd = self._defs.ExpandItem(cmd)
+            if not self._args.execute :
+                print "Not running:", cmd
+                continue
+            if self._args.verbose :
+                print "%s: Executing \"%s\"" % (name, str(cmd))
+            status = subprocess.call( cmd )
+            if status :
+                print "Exit status is", status
+
+    def RunProgram( self ) :
+        tmp = [ ]
+        tmp += self._tool.Prefix( )
+        tmp += self._tool.ToolArgs(self._args.tool_args)
+        tmp += self._tool.ProgArgs(self._defs.Lookup("Cmd"))
+        cmd = self._defs.ExpandItem( tmp )
+
+        if not self._args.execute :
+            print "Not running:", cmd
+            return
+
+        outfile = self._defs.Lookup("Output")
+        if outfile is not None :
+            outfile = self.ExpandStr( outfile )
+
+        if not self._args.quiet :
+            print "Running:", cmd
+            if outfile is not None :
+                print "Output ->", outfile
+        try :
+            if self._args.output is None  and  outfile is None :
+                status = subprocess.call( cmd )
+            else :
+                if self._args.output is not None :
+                    out = self._args.output
+                else :
+                    out = open( outfile, "w" )
+                p = subprocess.Popen( cmd,
+                                      stdout=subprocess.PIPE,
+                                      stderr=subprocess.STDOUT )
+                for line in p.stdout :
+                    print >>out, line.strip()
+                    if self._args.verbose >= 2 :
+                        print line.strip()
+                p.wait()
+                status = p.returncode
+        except KeyboardInterrupt:
+            status = 0
+        if status :
+            print "Exit status is", status
+        if self._tool.ToolOut is not None :
+            print self._tool.ToolName, "output is in", self._defs.ExpandStr(self._tool.ToolOut)
+
+    Defs = property( lambda self : self._defs )
+
+    def Main( self ) :
+        self.ParserSetup( )
+        self.Parse( )
+        self.DumpTable( )
+        self.RunPre( )
+        self.RunProgram( )
+
 
 if __name__ == "__main__" :
-    assert(0, "not stand-alone")
+    assert 0, "not stand-alone"

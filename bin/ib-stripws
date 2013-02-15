@@ -11,7 +11,7 @@ for root, dirs, files in os.walk( ".", topdown=True ) :
         if d in ( ('.git') ) :
             dirs.pop(i)
     for name in files :
-        if not name.endswith( ('.c', '.cc', '.h', '.hh') ) :
+        if not name.endswith( ('.c', '.cc', '.h', '.hh', 'Makefile.am') ) :
             continue
         full = os.path.join(root, name)
         try :

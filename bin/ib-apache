@@ -15,18 +15,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ****************************************************************************
-import re
 import os
 import sys
-import copy
-import glob
-import subprocess
-import argparse
 
-from ib_tools import *
+from ibtool import *
 
 
-class Main( ToolMain ) :
+class Main( IbToolMain ) :
     _httpd_defs = {
         "HttpdVer"      : "2.4.3",
         "HttpdDir"      : os.path.join(os.environ["EXT_INSTALL"], "httpd-${HttpdVer}"),
@@ -37,166 +32,11 @@ class Main( ToolMain ) :
         "HttpdConf"     : "${Etc}/httpd/httpd.conf",
         "Prog"          : "${HttpdDir}/bin/httpd",
         "Args"          : [ "-d", "${HttpdEtc}", "-f" "${HttpdConf}", "-D", "FOREGROUND" ],
-        "Cmd"           : [ "${Prog}", "${Args}" ],
-        "PreCmds"       : { "HTTPD" : ["make", "-C", "${HttpdEtcIn}", "${MakeArgs}"],
-                            "IB"  : ["make", "-C", "${IbEtc}", "${MakeArgs}"], },
         }
 
     def __init__( self ) :
-        ToolMain.__init__( self, "Apache HTTPd", "Httpd", self._httpd_defs )
-
-    def Parse( self ) :
-        self._args, tool_args = self._parser.parse_known_args()
-        self._args.tool_args = tool_args
-        for name,value in self._args.defs :
-            self._defs[name] = value
-        self._tool = self._CmdPrefixes[self._args.tool]
-        if self._args.clean :
-            files = [ ]
-            for expanded in self.Expand( ("${HttpdLogFiles}",) ) :
-                files += glob.glob(expanded)
-            if len(files) :
-                self._defs["PreCmds"]["Clean"] = [ "/bin/rm" ] + files
-        if self._args.force_make :
-            self._defs["MakeArgs"].append("-B")
-        self._tool.SetVerbose( self._args.verbose )
-
-    def Expand( self, args ) :
-        loops = 0
-        if type(args) == tuple :
-            args = list(args)
-        elif type(args) != list :
-            args = [ args ]
-        if self._args.verbose >= 2 :
-            print "Expanding:", args
-            print "  using:", self._defs
-        while True :
-            initial = copy.copy(args)
-            for n,arg in enumerate(args) :
-                for key,value in self._defs.items() :
-                    s = '${'+key+'}'
-                    c = copy.copy(args)
-                    if arg == s  and  type(value) == list :
-                        expanded = self.Expand(value)
-                        args = args[:n] + expanded + args[n+1:]
-                        if self._args.verbose >= 3 :
-                            print c, key+"="+str(expanded), "->", args
-                        continue
-                    if s in arg :
-                        args[n] = arg.replace(s, str(value))
-                        if self._args.verbose >= 3 :
-                            print c, key+"="+str(value), "->", args
-            if initial == args  or  loops > 10 :
-                if self._args.verbose >= 2 :
-                    print "Expanded:", args
-                return args
-            loops += 1
-
-    def ExpandStr( self, s ) :
-        if s is None :
-            return None
-        expanded = self.Expand( [s] )
-        assert len(expanded) == 1
-        return expanded[0]
-
-    def ExpandItem( self, item ) :
-        if item is None :
-            return None
-        elif type(item) == str :
-           return self.ExpandStr( item )
-        else :
-            return self.Expand( item )
-
-    def RunPre( self ) :
-        cmds = self._defs["PreCmds"]
-        for name, cmd in cmds.items() :
-            cmd = self.Expand(cmd)
-            if not self._args.execute :
-                print "Not running:", cmd
-                continue
-            if self._args.verbose :
-                print "%s: Executing \"%s\"" % (name, str(cmd))
-            status = subprocess.call( cmd )
-            if status :
-                print "Exit status is", status
-
-
-    def RunHttpd( self ) :
-        for key,value in self._tool.Defs.items() :
-            if key not in self._defs :
-                self._defs[key] = value
-        tmp = [ ]
-        tmp += self._tool.Prefix( )
-        tmp += self._tool.ToolArgs(self._args.tool_args)
-        tmp += self._tool.ProgArgs(self._defs["Cmd"])
-        cmd = self.Expand( tmp )
-
-        if not self._args.execute :
-            print "Not running:", cmd
-            return
-
-        outfile = self._defs.get("Output")
-        if outfile is not None :
-            outfile = self.ExpandStr( outfile )
-
-        if not self._args.quiet :
-            print "Running:", cmd
-            if outfile is not None :
-                print "Output ->", outfile
-        try :
-            if self._args.output is None  and  outfile is None :
-                status = subprocess.call( cmd )
-            else :
-                if self._args.output is not None :
-                    out = self._args.output
-                else :
-                    out = open( outfile, "w" )
-                p = subprocess.Popen( cmd,
-                                      stdout=subprocess.PIPE,
-                                      stderr=subprocess.STDOUT )
-                for line in p.stdout :
-                    print >>out, line.strip()
-                    if self._args.verbose >= 2 :
-                        print line.strip()
-                p.wait()
-                status = p.returncode
-        except KeyboardInterrupt:
-            status = 0
-        if status :
-            print "Exit status is", status
-        if self._tool.ToolOut is not None :
-            print self._tool.ToolName, "output is in", self.ExpandStr(self._tool.ToolOut)
-
-    def PrintTable( self ) :
-        for name, value in self._defs.items( ) :
-            if self._args.print_mode == "print" :
-                print name, "=", value
-                continue
-
-            expanded = value
-            if type(value) == str :
-                expanded = self.ExpandStr(value)
-            elif type(value) == int :
-                expan
-            elif type(value) in (list, tuple) :
-                expanded = [ self.ExpandItem(v) for v in value ]
-            elif type(value) == dict :
-                expanded = { }
-                for n,v in value.items( ) :
-                    expanded[n] = self.ExpandItem(v)
-            else :
-                print >>sys.stderr, "I don't know how to expand", \
-                    name, "with type", type(value)
-            print name, "=", expanded
-        
-    def Main( self ) :
-        self.ParserSetup( )
-        self.Parse( )
-        if self._args.print_mode is not None :
-            self.PrintTable( )
-            sys.exit(0)
-        self.RunPre( )
-        self.RunHttpd( )
+        IbToolMain.__init__( self, "Apache HTTPd", "Httpd", self._httpd_defs )
+        self.Defs.Append( "PreCmds", [["make", "-C", "${HttpdEtcIn}", "${MakeArgs}"]] )
 
 main = Main( )
 main.Main( )
