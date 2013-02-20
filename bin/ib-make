@@ -22,6 +22,33 @@ import sys
 import subprocess
 import argparse
 
+class Target( object ) :
+    def __init__( self, name, enable=True, targets=None, force_one=False, directory=None ) :
+        self._name = name
+        self._enabled = enable
+        if targets == None :
+            self._targets = ( name, )
+        else :
+            self._targets = targets
+        self._force_one = force_one
+        self._dir = directory
+    Name     = property( lambda self : self._name )
+    Enabled  = property( lambda self : self._enabled )
+    Targets  = property( lambda self : self._targets )
+    ForceOne = property( lambda self : self._force_one )
+    Dir      = property( lambda self : self._dir )
+
+    def MakeArgs( self, max_jobs ) :
+        args = [ "-j", str(self.NumJobs(max_jobs)) ]
+        if self._dir is not None :
+            args += [ "-C", self._dir ]
+        args += self._targets
+        return args
+
+    def NumJobs( self, max_jobs ) :
+        return 1 if self._force_one else max_jobs
+
+
 class Main( object ) :
     def _ParserSetup( self ) :
         self._parser = argparse.ArgumentParser( description="Build IronBee",
@@ -79,12 +106,12 @@ class Main( object ) :
         if (self._args.jobs == 0) :
             self._args.jobs = self._CalcMaxJobs( )
 
-    def _RunMake( self, force_one_job, targets, directory=None ) :
-        jobs = 1 if force_one_job else self._args.jobs
-        cmd = [ "/usr/bin/make", "-j", str(jobs) ]
-        if directory is not None :
-            cmd += [ "-C", directory ]
-        cmd += targets
+    def _RunMake( self, target ) :
+        if not target.Enabled :
+            return
+
+        cmd = [ "/usr/bin/make" ]
+        cmd += target.MakeArgs(self._args.jobs)
 
         if not self._args.execute :
             print "Not running:", cmd
@@ -100,14 +127,14 @@ class Main( object ) :
     def Main( self ) :
         self._ParserSetup( )
         self._ParseArgs( )
-        if self._args.clean :
-            self._RunMake( True,  [ "clean" ] )
-        self._RunMake( False, [], "libs" )
-        self._RunMake( False, [] )
-        if self._args.install :
-            self._RunMake( True,  [ "install" ] )
-        if self._args.check :
-            self._RunMake( False, [ "check" ] )
+        targets = ( Target("clean", enable=self._args.clean, force_one=True),
+                    Target("libs"),
+                    Target("default", targets=[ ]),
+                    Target("install", self._args.install, force_one=True),
+                    Target("check",  self._args.check),
+        )
+        for target in targets :
+            self._RunMake( target )
 
 main = Main()
 main.Main( )
