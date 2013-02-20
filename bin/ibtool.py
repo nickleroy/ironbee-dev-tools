@@ -58,9 +58,17 @@ class _Tool( object ) :
     def Prefix( self ) :
         return self._prefix
     def ToolArgs( self, args ) :
+        assert type(args) in (list,tuple)
         return list(args) + list(self._tool_args)
+    def AppendToolArgs( self, args ) :
+        assert type(args) in (list,tuple)
+        self._tool_args += list(args)
     def ProgArgs( self, args ) :
+        assert type(args) in (list,tuple)
         return list(args) + list(self._prog_args)
+    def AppendProgArgs( self, args ) :
+        assert type(args) in (list,tuple)
+        self._prog_args += args
 
 
 class _ToolGdb( _Tool ) :
@@ -68,7 +76,7 @@ class _ToolGdb( _Tool ) :
     def __init__( self, name ) :
         _Tool.__init__( self, name,
                         prefix=self._gdb_prefix,
-                        tool_args="--args", prog_args="-X" )
+                        tool_args="--args" )
 
 class _ToolStrace( _Tool ) :
     _strace_prefix = ("${ToolName}",
@@ -215,7 +223,6 @@ class IbToolMain( object ) :
             self._defs.Append("MakeArgs", "-B")
         self._tool.SetVerbose( self._args.verbose )
 
-
     def DumpTable( self ) :
         if self._args.dump_mode is None :
             return
@@ -278,6 +285,9 @@ class IbToolMain( object ) :
             print self._tool.ToolName, "output is in", self._defs.ExpandStr(self._tool.ToolOut)
 
     Defs = property( lambda self : self._defs )
+
+    def GetTool( self, name ) :
+        return self._toos[name]
 
     def Main( self ) :
         self.ParserSetup( )

@@ -31,7 +31,7 @@ class Main( IbToolMain ) :
         "AtsEtc"      : "${Etc}/trafficserver",
         "Prog"        : "${AtsDir}/bin/traffic_server",
         "Trace"       : 'http.*|dns.*|http_hdrs|sdk|ironbee|libloader',
-        "Args"        : [ '-T${Trace}', '-K' ],
+        "Args"        : [ '-K', '-T${Trace}' ],
         }
 
     def __init__( self ) :
