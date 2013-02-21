@@ -21,6 +21,7 @@ import os
 import sys
 import subprocess
 import argparse
+import glob
 
 class Target( object ) :
     def __init__( self, name, enable=True, targets=None, force_one=False, directory=None ) :
@@ -61,6 +62,10 @@ class Main( object ) :
         self._parser.add_argument( "--clean",
                                    action="store_true", dest="clean", default=False,
                                    help="Build clean target" )
+
+        self._parser.add_argument( "--wipe",
+                                   action="store_true", dest="wipe", default=False,
+                                   help="Wipe directory & run confgen" )
 
         self._parser.add_argument( "--check", "--test", "-t",
                                    action="store_true", dest="check", default=False,
@@ -106,27 +111,29 @@ class Main( object ) :
         if (self._args.jobs == 0) :
             self._args.jobs = self._CalcMaxJobs( )
 
-    def _RunMake( self, target ) :
+    def _RunCommand( self, cmd ) :
+        if not self._args.execute :
+            print "Not running:", cmd
+            return 0
+
+        if not self._args.quiet :
+            print "Running:", cmd
+
+        status = subprocess.call( cmd )
+        return status
+
+    def _BuildTarget( self, target ) :
         if not target.Enabled :
             return
 
         cmd = [ "/usr/bin/make" ]
         cmd += target.MakeArgs(self._args.jobs)
 
-        if not self._args.execute :
-            print "Not running:", cmd
-            return
-
-        if not self._args.quiet :
-            print "Running:", cmd
-
-        status = subprocess.call( cmd )
+        status = self._RunCommand( cmd )
         if status != 0 :
             sys.exit( status )
 
-    def Main( self ) :
-        self._ParserSetup( )
-        self._ParseArgs( )
+    def _BuildAll( self ) :
         targets = ( Target("clean", enable=self._args.clean, force_one=True),
                     Target("libs"),
                     Target("default", targets=[ ]),
@@ -134,7 +141,19 @@ class Main( object ) :
                     Target("check",  self._args.check),
         )
         for target in targets :
-            self._RunMake( target )
+            self._BuildTarget( target )
+
+    def _Wipe( self ) :
+        self._RunCommand( ["/usr/bin/rm", "-fr"] + glob.glob("*") )
+        self._RunCommand( ["confgen",] )
+
+    def Main( self ) :
+        self._ParserSetup( )
+        self._ParseArgs( )
+        if self._args.wipe :
+            self._Wipe( )
+        self._BuildAll( )
+
 
 main = Main()
 main.Main( )
