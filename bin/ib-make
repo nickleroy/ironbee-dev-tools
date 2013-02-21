@@ -31,7 +31,11 @@ class Main( object ) :
                                    action="store_true", dest="force", default=False,
                                    help="Force make")
 
-        self._parser.add_argument( "--check", "--test", "-c", "-t",
+        self._parser.add_argument( "--clean",
+                                   action="store_true", dest="clean", default=False,
+                                   help="Build clean target" )
+
+        self._parser.add_argument( "--check", "--test", "-t",
                                    action="store_true", dest="check", default=False,
                                    help="Build check target" )
         self._parser.add_argument( "--no-check", "--no-test",
@@ -96,6 +100,8 @@ class Main( object ) :
     def Main( self ) :
         self._ParserSetup( )
         self._ParseArgs( )
+        if self._args.clean :
+            self._RunMake( True,  [ "clean" ] )
         self._RunMake( False, [], "libs" )
         self._RunMake( False, [] )
         if self._args.install :
