@@ -102,6 +102,7 @@ class IbToolMain( object ) :
         "Devel"         : os.environ["QYLS_DEVEL"],
         "Var"           : os.environ.get("QYLS_VAR", "${Devel}/var"),
         "Log"           : "${Var}/log",
+        "LogFiles"      : "${Log}/*",
         "Etc"           : os.environ.get("QYLS_ETC", "${Devel}/etc"),
         "EtcIn"         : os.environ.get("QYLS_ETC_IN", "${Devel}/etc.in"),
         "MakeArgs"      : [ ],
@@ -197,9 +198,9 @@ class IbToolMain( object ) :
         self._args, tool_args = self._parser.parse_known_args()
         self._args.tool_args = tool_args
 
+    def Setup( self ) :
         for name,value in self._args.defs :
             self._defs.Set( name, value )
-
         self._tool = self._tools[self._args.tool]
         self._defs.SetDict( self._tool.Defs, over=False )
 
@@ -281,6 +282,7 @@ class IbToolMain( object ) :
     def Main( self ) :
         self.ParserSetup( )
         self.Parse( )
+        self.Setup( )
         self.DumpTable( )
         self.RunPre( )
         self.RunProgram( )
