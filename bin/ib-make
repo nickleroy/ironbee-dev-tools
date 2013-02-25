@@ -81,6 +81,10 @@ class Main( object ) :
                                    action="store_false", dest="install",
                                    help="Don't build install target" )
 
+        self._parser.add_argument( "--doxygen", "--docs",
+                                   action="store_true", dest="doxygen", default=False,
+                                   help="Build doxygen target" )
+
         self._parser.add_argument( "--jobs", "-j",
                                    action="store", type=int, dest="jobs", default=0,
                                    help="Force number of jobs to run" )
@@ -139,6 +143,7 @@ class Main( object ) :
                     Target("default", targets=[ ]),
                     Target("install", self._args.install, force_one=True),
                     Target("check",  self._args.check),
+                    Target("doxygen",  self._args.doxygen, force_one=True),
         )
         for target in targets :
             self._BuildTarget( target )
