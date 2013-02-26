@@ -88,7 +88,10 @@ class Main( object ) :
 
         self._parser.add_argument( "--force-make", "-f",
                                    action="store_true", dest="force", default=False,
-                                   help="Force make")
+                                   help="Force make / wipe")
+        self._parser.add_argument( "--no-force",
+                                   action="store_false", dest="force",
+                                   help="Don't force make / wipe" )
 
         self._parser.add_argument( "--clean",
                                    action="store_true", dest="clean", default=False,
@@ -132,6 +135,7 @@ class Main( object ) :
         self._parser.add_argument( "--execute",
                                    action="store_true", dest="execute", default=True,
                                    help="Enable execution <default>" )
+
         self._parser.add_argument( "-n", "--no-execute",
                                    action="store_false", dest="execute",
                                    help="Disable execution (for test/debug)" )
@@ -181,6 +185,10 @@ class Main( object ) :
             self._BuildTarget( target )
 
     def _Wipe( self ) :
+        if not self._args.force :
+            ans = raw_input( "Really wipe? " )
+            if not ans.startswith( ('y', 'Y') ) :
+                sys.exit( 1 )
         self._RunCommand( ["rm", "-fr"] + glob.glob("*") )
         self._RunCommand( ["confgen",] )
 
