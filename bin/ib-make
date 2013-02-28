@@ -22,13 +22,16 @@ import sys
 import subprocess
 import argparse
 import glob
+from functools import partial
 
 class Target( object ) :
-    def __init__( self, name, targets=None, force_one=False, flags=None, directory=None ) :
+    def __init__( self, name, targets=None, force_one=False, pre_fn=None,
+                  flags=None, directory=None ) :
         self._name = name
         self._targets = ( name, ) if targets is None else targets
         self._flags = ( ) if flags is None else flags
         self._force_one = force_one
+        self._pre_fn = pre_fn
         self._dir = directory
         self._enabled = True
     def _SetEnabled( self, enabled ) :
@@ -39,6 +42,13 @@ class Target( object ) :
     ForceOne = property( lambda self : self._force_one )
     Dir      = property( lambda self : self._dir )
     Flags    = property( lambda self : self._flags )
+
+    def SetPreExec( self, pre_fn ) :
+        self._pre_fn = pre_fn
+
+    def PreExec( self, p ) :
+        if self._pre_fn is not None :
+            self._pre_fn( p )
 
     def MakeArgs( self, max_jobs ) :
         args = [ "-j", str(self.NumJobs(max_jobs)) ]
@@ -58,13 +68,21 @@ class Target( object ) :
 class Targets( object ) :
     def __init__( self, targets ) :
         self._targets = targets
+        self._byname = { }
+        for t in targets :
+            self._byname[t.Name] = t
 
     def AddTarget( self, target ) :
         self._targets.append( target )
         self._byname[target.Name] = target
 
+    def Target( self, name ) :
+        return self._byname[name]
+
     def FlagEnable( self, flag, enabled ) :
+        #print flag, enabled
         for target in self._targets :
+            #print "  ", target.Name, target.Flags
             target.FlagEnable( flag, enabled )
 
     def Targets( self, fn=None ) :
@@ -75,26 +93,36 @@ class Targets( object ) :
                 
 
 class Main( object ) :
-    _targets = Targets( (Target("clean", flags=("clean",), force_one=True),
-                         Target("libs", flags=("default",) ),
-                         Target("default", flags=("default",), targets=[ ]),
-                         Target("install", flags=("install","default"), force_one=True),
-                         Target("check",  flags=("check","default") ),
-                         Target("doxygen",  flags=("doxygen",), force_one=True),) )
+    @classmethod
+    def InitMain( cls ) :
+        if "_targets" in dir(cls) :
+            return
+        targets = Targets( (Target("clean", flags=("clean",), force_one=True,
+                                   pre_fn=lambda self:self._Confirm("make clean") ),
+                            Target("libs", flags=("default",) ),
+                            Target("default", flags=("default",), targets=[ ]),
+                            Target("install", flags=("install","default"), force_one=True),
+                            Target("check",  flags=("check","default") ),
+                            Target("doxygen",  flags=("doxygen",), force_one=True),
+                            Target("rpm", targets=("rpm-package",), flags=("rpm",) ),) )
+        cls._targets = targets
+        
+    def __init__( self ) :
+        Main.InitMain()
 
     def _ParserSetup( self ) :
         self._parser = argparse.ArgumentParser( description="Build IronBee",
                                                 prog=os.path.basename(sys.argv[0]) )
 
         self._parser.add_argument( "--force-make", "-f",
-                                   action="store_true", dest="force", default=False,
+                                   action="store_true", dest="target_force", default=False,
                                    help="Force make / wipe")
         self._parser.add_argument( "--no-force",
-                                   action="store_false", dest="force",
+                                   action="store_false", dest="target_force",
                                    help="Don't force make / wipe" )
 
         self._parser.add_argument( "--clean",
-                                   action="store_true", dest="clean", default=False,
+                                   action="store_true", dest="target_clean", default=False,
                                    help="Build clean target" )
 
         self._parser.add_argument( "--wipe",
@@ -102,25 +130,32 @@ class Main( object ) :
                                    help="Wipe directory & run confgen" )
 
         self._parser.add_argument( "--check", "--test", "-t",
-                                   action="store_true", dest="check", default=False,
+                                   action="store_true", dest="target_check", default=False,
                                    help="Build check target" )
         self._parser.add_argument( "--no-check", "--no-test",
-                                   action="store_false", dest="check",
+                                   action="store_false", dest="target_check",
                                    help="Don't build check target" )
 
         self._parser.add_argument( "--install", "-i",
-                                   action="store_true", dest="install", default=True,
+                                   action="store_true", dest="target_install", default=True,
                                    help="Build install target" )
         self._parser.add_argument( "--no-install",
-                                   action="store_false", dest="install",
+                                   action="store_false", dest="target_install",
                                    help="Don't build install target" )
 
-        self._parser.set_defaults( doxygen=False, default=True )
+        self._parser.add_argument( "--rpm",
+                                   action="store_true", dest="target_rpm", default=False,
+                                   help="Build rpm-package target" )
+        self._parser.add_argument( "--no-rpm",
+                                   action="store_false", dest="target_rpm",
+                                   help="Don't build rpm-package target" )
+
+        self._parser.set_defaults( target_doxygen=False, target_default=None )
         class DoxygenAction(argparse.Action):
             def __call__(self, parser, namespace, values, option_string=None):
-                namespace.doxygen = True
+                namespace.target_doxygen = True
                 if "only" in option_string :
-                    namespace.default = False
+                    namespace.target_default = False
         self._parser.add_argument( "--doxygen", "--docs",
                                    action=DoxygenAction, nargs=0,
                                    help="Build doxygen target" )
@@ -155,8 +190,9 @@ class Main( object ) :
 
     def _ParseArgs( self ) :
         self._args = self._parser.parse_args()
-        for flag in ( "clean", "install", "check", "doxygen", "default" ) :
-            self._targets.FlagEnable( flag, vars(self._args)[flag])
+        for key,value in vars(self._args).items() :
+            if key.startswith("target_") :
+                self._targets.FlagEnable( key[7:], value )
         if (self._args.jobs == 0) :
             self._args.jobs = self._CalcMaxJobs( )
 
@@ -173,6 +209,7 @@ class Main( object ) :
         return status
 
     def _BuildTarget( self, target ) :
+        target.PreExec( self )
         cmd = [ "/usr/bin/make" ]
         cmd += target.MakeArgs(self._args.jobs)
 
@@ -184,11 +221,14 @@ class Main( object ) :
         for target in self._targets.Targets( lambda target:target.Enabled ) :
             self._BuildTarget( target )
 
-    def _Wipe( self ) :
+    def _Confirm( self, what ) :
         if not self._args.force :
-            ans = raw_input( "Really wipe? " )
+            ans = raw_input( "Really %s? " % what )
             if not ans.startswith( ('y', 'Y') ) :
                 sys.exit( 1 )
+
+    def _Wipe( self ) :
+        self._Confirm("wipe")
         self._RunCommand( ["rm", "-fr"] + glob.glob("*") )
         self._RunCommand( ["confgen",] )
 
