@@ -1,13 +1,11 @@
 #!/bin/sh
-DEVEL=${HOME}/devel
-BUILD=${DEVEL}/build
-ETC=${DEVEL}/etc
-ETC_IB=${ETC}/ironbee
-DATA=${DEVEL}/data
-VAR=${DEVEL}/var
+DEVEL=${QYLS_DEVEL}
+BUILD=${QYLS_BUILD}
+ETC=${QYLS_ETC}/ironbee
+ETC_IN=${QYLS_ETC_IN}/ironbee
+DATA=${QYLS_DATA}
+VAR=${QYLS_VAR}
 TMP=${DEVEL}/tmp
-ETC_IN=${DEVEL}/etc.in
-ETC_IN_IB=${ETC_IN}/ironbee
 
 if test "$IBBUILD" = "" ; then
   IBBUILD="${BUILD}/gcc-std"
@@ -26,12 +24,8 @@ RSPFILE=${DATA}/skip2/rsp-0319/03198-40315-0000.raw
 # RSPFILE=${DATA}/req-data/rsp.raw
 # REQFILE=${DATA}/brian/2012-06-14.req
 # RSPFILE=${DATA}/brian/2012-06-14.rsp
-# REQFILE=${DATA}/tmp/2012-07-05.req
-# RSPFILE=${DATA}/tmp/2012-07-05.rsp
 # REQFILE=${DATA}/http-0.9-3-req.txt
 # RSPFILE=${DATA}/http-0.9-3-rsp.txt
-# REQFILE=${TMP}/segv/15008.req
-# RSPFILE=${TMP}/segv/15008.rsp
 
 
 #REMOTE_IP=128.105.121.53
@@ -63,7 +57,7 @@ elif [ "${REFERER}" != "" ] ; then
   HEADERS="${HEADERS} --request-header Referer:${REFERER}"
 fi
 
-CONF="--config ${ETC_IB}/cli.conf"
+CONF="--config ${ETC}/cli.conf"
 REQ="--request-file ${REQFILE}"
 RSP="--response-file ${RSPFILE}"
 MISC_ARGS="--dump all ${HEADERS}"
@@ -78,7 +72,7 @@ IBLOG=${LOG}/ibcli.log
 mkdir ${LOGBACK}
 mv ${LOG} ${LOGBACK}/ironbee-${DATE}
 mkdir ${LOG}
-make -C ${ETC_IN_IB}
+make -C ${ETC_IN}
 CMD="${CLI} ${CLI_ARGS}"
 echo ${CMD} "> ${OUT}"
 ${CMD} > ${OUT} 2>${ERR}
