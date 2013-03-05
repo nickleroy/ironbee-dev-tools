@@ -99,8 +99,8 @@ class Main( object ) :
             return
         targets = Targets( (Target("clean", flags=("clean",), force_one=True,
                                    pre_fn=lambda self:self._Confirm("make clean") ),
-                            Target("libs", flags=("default",) ),
-                            Target("default", flags=("default",), targets=[ ]),
+                            Target("libs", targets=tuple(), directory="libs", flags=("default",) ),
+                            Target("all", flags=("default",), targets=[ ]),
                             Target("install", flags=("install","default"), force_one=True),
                             Target("check",  flags=("check","default") ),
                             Target("doxygen",  flags=("doxygen",), force_one=True),
@@ -115,10 +115,10 @@ class Main( object ) :
                                                 prog=os.path.basename(sys.argv[0]) )
 
         self._parser.add_argument( "--force-make", "-f",
-                                   action="store_true", dest="target_force", default=False,
+                                   action="store_true", dest="force", default=False,
                                    help="Force make / wipe")
         self._parser.add_argument( "--no-force",
-                                   action="store_false", dest="target_force",
+                                   action="store_false", dest="force",
                                    help="Don't force make / wipe" )
 
         self._parser.add_argument( "--clean",
@@ -228,8 +228,10 @@ class Main( object ) :
                 sys.exit( 1 )
 
     def _Wipe( self ) :
-        self._Confirm("wipe")
-        self._RunCommand( ["rm", "-fr"] + glob.glob("*") )
+        globs = glob.glob("*")
+        if len(globs) :
+            self._Confirm("wipe")
+            self._RunCommand( ["rm", "-fr"] + globs )
         self._RunCommand( ["confgen",] )
 
     def Main( self ) :
