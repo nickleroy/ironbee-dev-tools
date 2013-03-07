@@ -165,7 +165,10 @@ class Main( object ) :
 
         self._parser.add_argument( "--jobs", "-j",
                                    action="store", type=int, dest="jobs", default=0,
-                                   help="Force number of jobs to run" )
+                                   help="Force number of # jobs to run" )
+        self._parser.add_argument( "-1",
+                                   action="store_const", dest="jobs", const=1,
+                                   help="Force number of # jobs to run to 1 (-j 1)" )
 
         self._parser.add_argument( "--execute",
                                    action="store_true", dest="execute", default=True,
