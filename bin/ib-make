@@ -22,6 +22,7 @@ import sys
 import subprocess
 import argparse
 import glob
+import collections
 from functools import partial
 
 class Target( object ) :
@@ -80,17 +81,15 @@ class Targets( object ) :
         return self._byname[name]
 
     def FlagEnable( self, flag, enabled ) :
-        #print flag, enabled
+        name = flag.replace("target_", "")
         for target in self._targets :
-            #print "  ", target.Name, target.Flags
-            target.FlagEnable( flag, enabled )
+            target.FlagEnable( name, enabled )
 
     def Targets( self, fn=None ) :
         for target in self._targets :
             if fn is None  or  fn(target) :
                 yield target
         return
-                
 
 class Main( object ) :
     @classmethod
@@ -122,40 +121,48 @@ class Main( object ) :
                                    help="Don't force make / wipe" )
 
         self._parser.add_argument( "--clean",
-                                   action="store_true", dest="target_clean", default=False,
+                                   action="store_true", dest="clean", default=False,
                                    help="Build clean target" )
 
         self._parser.add_argument( "--wipe",
                                    action="store_true", dest="wipe", default=False,
-                                   help="Wipe directory & run confgen" )
+                                   help="Wipe directory & run confgen (implies --confgen)" )
+
+        self._parser.add_argument( "--confgen",
+                                   action="store_true", dest="confgen", default=False,
+                                   help="Run confgen before building" )
+
+        self._parser.add_argument( "--autogen",
+                                   action="store_true", dest="autogen", default=False,
+                                   help="Autogen before building (implies --confgen)" )
 
         self._parser.add_argument( "--check", "--test", "-t",
-                                   action="store_true", dest="target_check", default=False,
+                                   action="store_true", dest="check", default=False,
                                    help="Build check target" )
         self._parser.add_argument( "--no-check", "--no-test",
-                                   action="store_false", dest="target_check",
+                                   action="store_false", dest="check",
                                    help="Don't build check target" )
 
         self._parser.add_argument( "--install", "-i",
-                                   action="store_true", dest="target_install", default=True,
+                                   action="store_true", dest="install", default=True,
                                    help="Build install target" )
         self._parser.add_argument( "--no-install",
-                                   action="store_false", dest="target_install",
+                                   action="store_false", dest="install",
                                    help="Don't build install target" )
 
         self._parser.add_argument( "--rpm",
-                                   action="store_true", dest="target_rpm", default=False,
+                                   action="store_true", dest="rpm", default=False,
                                    help="Build rpm-package target" )
         self._parser.add_argument( "--no-rpm",
-                                   action="store_false", dest="target_rpm",
+                                   action="store_false", dest="rpm",
                                    help="Don't build rpm-package target" )
 
-        self._parser.set_defaults( target_doxygen=False, target_default=None )
+        self._parser.set_defaults( doxygen=False, default=None )
         class DoxygenAction(argparse.Action):
             def __call__(self, parser, namespace, values, option_string=None):
-                namespace.target_doxygen = True
+                namespace.doxygen = True
                 if "only" in option_string :
-                    namespace.target_default = False
+                    namespace.default = False
         self._parser.add_argument( "--doxygen", "--docs",
                                    action=DoxygenAction, nargs=0,
                                    help="Build doxygen target" )
@@ -194,13 +201,16 @@ class Main( object ) :
     def _ParseArgs( self ) :
         self._args = self._parser.parse_args()
         for key,value in vars(self._args).items() :
-            if key.startswith("target_") :
-                self._targets.FlagEnable( key[7:], value )
+            self._targets.FlagEnable( key, value )
+            #self._pre.FlagEnable( key.replace("key_", ""), value )
+        if self._args.wipe or self._args.autogen :
+            self._args.confgen = True
         if (self._args.jobs == 0) :
             self._args.jobs = self._CalcMaxJobs( )
 
 
-    def _RunCommand( self, cmd ) :
+    def _RunCommand( self, cmd, cwd=None ) :
+        fromdir = "" if cwd is None else "from "+cwd
         if not self._args.execute :
             print "Not running:", cmd
             return 0
@@ -208,7 +218,7 @@ class Main( object ) :
         if not self._args.quiet :
             print "Running:", cmd
 
-        status = subprocess.call( cmd )
+        status = subprocess.call( cmd, cwd=cwd )
         return status
 
     def _BuildTarget( self, target ) :
@@ -235,13 +245,25 @@ class Main( object ) :
         if len(globs) :
             self._Confirm("wipe")
             self._RunCommand( ["rm", "-fr"] + globs )
+
+    def _AutoGen( self ) :
+        self._RunCommand( ["./autogen.sh",], cwd=os.environ["IB_ROOT"] )
+
+    def _ConfGen( self ) :
         self._RunCommand( ["confgen",] )
 
     def Main( self ) :
+        pre_cmds = collections.OrderedDict(
+            ( ('wipe', self._Wipe),
+              ('autogen', self._AutoGen),
+              ('confgen', self._ConfGen), )
+        )
         self._ParserSetup( )
         self._ParseArgs( )
-        if self._args.wipe :
-            self._Wipe( )
+        v = vars(self._args)
+        for name,fn in pre_cmds.items() :
+            if v[name] :
+                fn( )
         self._BuildAll( )
 
 
