@@ -1,10 +1,10 @@
 #!/bin/sh
-DEVEL=${HOME}/devel
-BUILD=${DEVEL}/build
-ETC=${DEVEL}/etc
+DEVEL=${QYLS_DEVEL}
+BUILD=${QYLS_BUILD}
+ETC=${QYLS_ETC}
 ETC_IB=${ETC}/ironbee
-DATA=${DEVEL}/data
-VAR=${DEVEL}/var
+DATA=${QYLS_DATA}
+VAR=${QYLS_VAR}
 TMP=${DEVEL}/tmp
 ETC_IN=${DEVEL}/etc.in
 ETC_IN_IB=${ETC_IN}/ironbee
