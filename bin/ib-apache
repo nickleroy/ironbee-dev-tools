@@ -89,7 +89,7 @@ class Main( object ) :
                        "Cmd"           : [ "${Prog}", "${Args}" ],
                        "IbEtc"         : "${EtcIn}/ironbee",
                        "PreCmds"       : { "HTTPD" : ["make", "-C", "${HttpdEtcIn}", "${MakeArgs}"],
-                                           "IB"  : ["make", "-C", "${IbEtc}", "${MakeArgs}"], },
+                                           "IB"    : ["make", "-C", "${IbEtc}", "${MakeArgs}"], },
                        }
         self._parser = argparse.ArgumentParser( description="Run Apache httpd with IronBee",
                                                 prog="ib-apache" )
