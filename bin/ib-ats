@@ -66,7 +66,7 @@ class Main( object ) :
                        "AtsEtc"      : "${Etc}/trafficserver",
                        "Prog"        : "${AtsDir}/bin/traffic_server",
                        "Trace"       : 'http.*|dns.*|http_hdrs|sdk|ironbee',
-                       "Args"        : [ '-T${Trace}' ],
+                       "Args"        : [ '-T${Trace}', '-K' ],
                        "MakeArgs"    : [ ],
                        "Cmd"         : [ "${Prog}", "${Args}" ],
                        "IbEtc"       : "${EtcIn}/ironbee",
