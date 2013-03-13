@@ -128,6 +128,9 @@ class IbToolMain( object ) :
         self._defs.Set( "NameLower", prefix.lower())
         self._defs.Set( "NameUpper", prefix.upper())
 
+    Name = property(lambda self : self._defs.Get("Name"))
+    NameLower = property(lambda self : self._defs.Get("NameLower"))
+    NameUpper = property(lambda self : self._defs.Get("NameUpper"))
 
     def ParserSetup( self ) :
         self._parser = argparse.ArgumentParser( description="Run "+self._name+" with IronBee",
@@ -218,7 +221,7 @@ class IbToolMain( object ) :
             for expanded in self._defs.ExpandStr( varname ) :
                 files += glob.glob(expanded)
             if len(files) :
-                self._defs.Append("PreCmds", [ "/bin/rm" ] + files )
+                self._defs.Append("PreCmds", [ "rm" ] + files )
         if self._args.force_make :
             self._defs.Append("MakeArgs", "-B")
         self._tool.SetVerbose( self._args.verbose )
@@ -236,7 +239,7 @@ class IbToolMain( object ) :
                 print "Not running:", cmd
                 continue
             if self._args.verbose :
-                print "%s: Executing \"%s\"" % (name, str(cmd))
+                print "%s: Executing \"%s\"" % (self.Name, str(cmd))
             status = subprocess.call( cmd )
             if status :
                 print "Exit status is", status
@@ -247,6 +250,8 @@ class IbToolMain( object ) :
         tmp += self._tool.ToolArgs(self._args.tool_args)
         tmp += self._tool.ProgArgs(self._defs.Lookup("Cmd"))
         cmd = self._defs.ExpandItem( tmp )
+        if len(cmd) == 0 :
+            return
 
         if not self._args.execute :
             print "Not running:", cmd

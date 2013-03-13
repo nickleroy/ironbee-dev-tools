@@ -22,12 +22,14 @@ from ibtool import *
 
 class Main( IbToolMain ) :
     _ats_defs = {
-        "AtsVer"      : "3.2.0",
-        "AtsDir"      : os.path.join(os.environ["EXT_INSTALL"], "trafficserver-${AtsVer}"),
+        "AtsVer"      : os.environ.get("ATS_VERSION", "3.2.4"),
+        "AtsDir"      : os.environ.get("ATS_ROOT",
+                                       os.path.join(os.environ["EXT_INSTALL"],
+                                                    "trafficserver-${AtsVer}")),
         "AtsVar"      : "${AtsDir}/var",
         "AtsLog"      : "${AtsVar}/log/trafficserver",
         "AtsLogFiles" : "${AtsLog}/*",
-        "AtsEtcIn"    : "${EtcIn}/trafficserver/cur",
+        "AtsEtcIn"    : "${EtcIn}/trafficserver/working/${AtsVer}",
         "AtsEtc"      : "${Etc}/trafficserver",
         "Prog"        : "${AtsDir}/bin/traffic_server",
         "Trace"       : 'http.*|dns.*|http_hdrs|sdk|ironbee|libloader',

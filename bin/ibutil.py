@@ -98,6 +98,9 @@ class IbExpander( object ) :
         else :
             return self.ExpandList( item )
 
+    def Get( self, name ) :
+        return self._defs.get(name, None)
+
     def Lookup( self, name ) :
         return self._defs.get(name, None)
 
