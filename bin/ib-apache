@@ -69,14 +69,15 @@ class Main( object ) :
         }
 
     def __init__( self ) :
+        env = os.environ
         self._defs = { "PID"           : os.getpid(),
                        "Run"           : "${PID}",
-                       "Devel"         : os.environ["QYLS_DEVEL"],
-                       "Var"           : os.environ.get("QYLS_VAR", "${Devel}/var"),
+                       "Devel"         : env["QYLS_DEVEL"],
+                       "Var"           : env.get("QYLS_VAR", "${Devel}/var"),
                        "Log"           : "${Var}/log",
-                       "Etc"           : os.environ.get("QYLS_ETC", "${Devel}/etc"),
-                       "EtcIn"         : os.environ.get("QYLS_ETC_IN", "${Devel}/etc.in"),
-                       "httpdVer"      : os.environ.get("HTTPD_VERSION", "2.4.3"),
+                       "Etc"           : env.get("QYLS_ETC", "${Devel}/etc"),
+                       "EtcIn"         : env.get("QYLS_ETC_IN", "${Devel}/etc.in"),
+                       "httpdVer"      : env.get("HTTPD_VERSION", "2.4.3"),
                        "HttpdDir"      : env.get("HTTPD_ROOT",
                                                  os.path.join(env["EXT_INSTALL"], "httpd-${HttpdVer}")),
                        "HttpdLog"      : "${Log}/httpd",
