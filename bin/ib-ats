@@ -48,7 +48,9 @@ class Main( object ) :
         "none"     : Tool("none" ),
         "gdb"      : Tool("gdb",      prefix=("${ToolName}", "--args") ),
         "strace"   : Tool("strace",   prefix=("${ToolName}", "-o", "${ToolOut}") ),
-        "valgrind" : Tool("valgrind", prefix=valgrind, defs={"SubTool":"memcheck"}),
+        "valgrind" : Tool("valgrind",
+                          prefix=valgrind + ("--leak-check=full",),
+                          defs={"SubTool":"memcheck"}),
         "helgrind" : Tool("helgrind", prefix=valgrind, defs={"SubTool":"helgrind"}),
         }
 
@@ -225,7 +227,7 @@ class Main( object ) :
         for name, cmd in cmds.items() :
             cmd = self.Glob(self.Expand(cmd))
             if len(cmd) == 0 :
-                next
+                continue
             if not self._args.execute :
                 print "Not running:", cmd
                 continue
