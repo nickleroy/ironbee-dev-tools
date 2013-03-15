@@ -23,6 +23,8 @@ import sys
 import subprocess
 import argparse
 import collections
+import netifaces
+import socket
 
 class Dict(dict):
     class Value( object ) :
@@ -302,6 +304,19 @@ class Main( object ) :
         self._defs.Set('InFile', basename)
         baseid = re.sub( r'\..+', r'', basename)
         self._defs.Set('Base', baseid, over=False)
+        for name in netifaces.interfaces() :
+            try :
+                ip = netifaces.ifaddresses(name)[netifaces.AF_INET][0]['addr']
+                self._defs.Set("iface:"+name, ip, over=False)
+                if ip.startswith("192.168") :
+                    self._defs.Set("iface:private", ip, over=False)
+                elif name.startswith("eth") :
+                    self._defs.Set("iface:public", ip, over=False)
+                if name.startswith("eth") :
+                    self._defs.Set("iface:eth", ip, over=False)
+            except KeyError :
+                continue
+        self._defs.Set("hostname", socket.gethostname(), over=False)
         self.ProcessFile( self._args.infile, baseid, True )
         
     def Main( self ) :
