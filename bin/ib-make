@@ -202,18 +202,20 @@ class Main( object ) :
         self._args = self._parser.parse_args()
         for key,value in vars(self._args).items() :
             self._targets.FlagEnable( key, value )
-            #self._pre.FlagEnable( key.replace("key_", ""), value )
         if self._args.wipe or self._args.autogen :
             self._args.confgen = True
         if (self._args.jobs == 0) :
             self._args.jobs = self._CalcMaxJobs( )
 
 
-    def _RunCommand( self, cmd, cwd=None ) :
+    def _RunCommand( self, cmd, cwd=None, no_exec_flag=None ) :
         fromdir = "" if cwd is None else "from "+cwd
         if not self._args.execute :
-            print "Not running:", cmd
-            return 0
+            if no_exec_flag is None :
+                print "Not running:", cmd
+                return 0
+            else :
+                cmd += [ no_exec_flag ]
 
         if not self._args.quiet :
             print "Running:", cmd
@@ -234,23 +236,38 @@ class Main( object ) :
         for target in self._targets.Targets( lambda target:target.Enabled ) :
             self._BuildTarget( target )
 
-    def _Confirm( self, what ) :
+    def _Confirm( self, what, prefix=None ) :
         if not self._args.force :
-            ans = raw_input( "Really %s? " % what )
+            if prefix :
+                ans = raw_input( "%s  Really %s? " % (prefix, what) )
+            else :
+                ans = raw_input( "Really %s? " % what )
             if not ans.startswith( ('y', 'Y') ) :
                 sys.exit( 1 )
 
+    __wipe_checks = (
+        'configure.ac',
+        'Makefile.am',
+        'VERSION',
+        'INSTALL',
+    )
     def _Wipe( self ) :
         globs = glob.glob("*")
-        if len(globs) :
-            self._Confirm("wipe")
-            self._RunCommand( ["rm", "-fr"] + globs )
+        if len(globs) == 0 :
+            return
+        self._Confirm("wipe")
+        for name in self.__wipe_checks :
+            exists = os.path.isfile(name)
+            link = os.path.islink(name)
+            if exists and not link :
+                self._Confirm("wipe", name+" exists.")
+        self._RunCommand( ["rm", "-fr"] + globs )
 
     def _AutoGen( self ) :
         self._RunCommand( ["./autogen.sh",], cwd=os.environ["IB_ROOT"] )
 
     def _ConfGen( self ) :
-        self._RunCommand( ["confgen",] )
+        self._RunCommand( ["confgen"], no_exec_flag='--no-execute' )
 
     def Main( self ) :
         pre_cmds = collections.OrderedDict(
