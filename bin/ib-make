@@ -22,6 +22,7 @@ import sys
 import subprocess
 import argparse
 import glob
+import math
 import collections
 from functools import partial
 
@@ -177,6 +178,16 @@ class Main( object ) :
                                    action="store_const", dest="jobs", const=1,
                                    help="Force number of # jobs to run to 1 (-j 1)" )
 
+        class AggressionAction(argparse.Action):
+            def __call__(self, parser, namespace, values, option_string=None):
+                if values is not None :
+                    namespace.aggression = values
+                else :
+                    namespace.aggression = 1.0
+        self._parser.add_argument( "--aggressive", "-a",
+                                   action=AggressionAction, dest="aggressive", type=float, default=-1.0, nargs='?',
+                                   help="Set the number of make jobs aggressively [<aggression mult>]" )
+
         self._parser.add_argument( "--execute",
                                    action="store_true", dest="execute", default=True,
                                    help="Enable execution <default>" )
@@ -196,7 +207,8 @@ class Main( object ) :
         for line in open( "/proc/cpuinfo" ) :
             if line.startswith("processor") :
                 cpus += 1
-        return (cpus / 2) if cpus >= 2 else 1
+        aggression = 0.5 if self._args.aggression < 0.5 else self._args.aggression
+        return int(math.floor((cpus * aggression) + 0.5))
 
     def _ParseArgs( self ) :
         self._args = self._parser.parse_args()
