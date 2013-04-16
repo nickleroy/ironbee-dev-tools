@@ -19,10 +19,11 @@
 ###########################################################################
 import os
 import sys
-import subprocess
-import argparse
+import shutil
 import glob
 import math
+import argparse
+import subprocess
 import collections
 from functools import partial
 
@@ -192,6 +193,10 @@ class Main( object ) :
                                    action="store_true", dest="execute", default=True,
                                    help="Enable execution <default>" )
 
+        self._parser.add_argument( "--confirm",
+                                   action="store_true", dest="confirm", default=False,
+                                   help="Confirm before doing anything <default=off>" )
+
         self._parser.add_argument( "-n", "--no-execute",
                                    action="store_false", dest="execute",
                                    help="Disable execution (for test/debug)" )
@@ -220,10 +225,10 @@ class Main( object ) :
             self._args.jobs = self._CalcMaxJobs( )
 
 
-    def _RunCommand( self, cmd, cwd=None, no_exec_flag=None ) :
+    def _RunCommand( self, cmd, cwd=None, execute=True, no_exec_flag=None ) :
         fromdir = "" if cwd is None else "from "+cwd
-        if not self._args.execute :
-            if no_exec_flag is None :
+        if not self._args.execute  or  not execute :
+            if no_exec_flag is None:
                 print "Not running:", cmd
                 return 0
             else :
@@ -235,18 +240,18 @@ class Main( object ) :
         status = subprocess.call( cmd, cwd=cwd )
         return status
 
-    def _BuildTarget( self, target ) :
+    def _BuildTarget( self, target, execute=False ) :
         target.PreExec( self )
         cmd = [ "/usr/bin/make" ]
         cmd += target.MakeArgs(self._args.jobs)
 
-        status = self._RunCommand( cmd )
+        status = self._RunCommand( cmd, execute=execute )
         if status != 0 :
             sys.exit( status )
 
-    def _BuildAll( self ) :
+    def _BuildAll( self, execute ) :
         for target in self._targets.Targets( lambda target:target.Enabled ) :
-            self._BuildTarget( target )
+            self._BuildTarget( target, execute=execute )
 
     def _Confirm( self, what, prefix=None ) :
         if not self._args.force :
@@ -263,37 +268,57 @@ class Main( object ) :
         'VERSION',
         'INSTALL',
     )
-    def _Wipe( self ) :
-        globs = glob.glob("*")
+    def _Wipe( self, execute ) :
+        globs = glob.glob('*')
         if len(globs) == 0 :
             return
-        self._Confirm("wipe")
+        if execute  and  self._args.execute :
+            self._Confirm("wipe")
         for name in self.__wipe_checks :
             exists = os.path.isfile(name)
             link = os.path.islink(name)
             if exists and not link :
                 self._Confirm("wipe", name+" exists.")
-        self._RunCommand( ["rm", "-fr"] + globs )
+        self._RunCommand( ["rm", "-fr"] + globs, execute=execute )
 
-    def _AutoGen( self ) :
-        self._RunCommand( ["./autogen.sh",], cwd=os.environ["IB_ROOT"] )
+    def _CopyTreeIgnore( dirpath, dirents ) :
+        out = []
+        for de in dirents :
+            if not de.startswith(".git") :
+                out.append(de)
+        return out
 
-    def _ConfGen( self ) :
-        self._RunCommand( ["confgen"], no_exec_flag='--no-execute' )
+    def _CopyTree( self ) :
+        globs = glob.glob('*')
+        if len(globs) != 0 :
+            self._Confirm("overwrite")
+        shutil.copytree( )
+
+    def _AutoGen( self, execute ) :
+        self._RunCommand( ["./autogen.sh",], cwd=os.environ["IB_ROOT"], execute=execute )
+
+    def _ConfGen( self, execute ) :
+        self._RunCommand( ["confgen"], execute=execute, no_exec_flag='--no-execute' )
+
+    def _Run( self, execute ) :
+        v = vars(self._args)
+        for name,fn in self._pre_cmds.items() :
+            if v[name] :
+                fn( execute )
+        self._BuildAll( execute )
 
     def Main( self ) :
-        pre_cmds = collections.OrderedDict(
+        self._pre_cmds = collections.OrderedDict(
             ( ('wipe', self._Wipe),
               ('autogen', self._AutoGen),
               ('confgen', self._ConfGen), )
         )
         self._ParserSetup( )
         self._ParseArgs( )
-        v = vars(self._args)
-        for name,fn in pre_cmds.items() :
-            if v[name] :
-                fn( )
-        self._BuildAll( )
+        if self._args.confirm :
+            self._Run( False )
+            self._Confirm("build")
+        self._Run( True )
 
 
 main = Main()
