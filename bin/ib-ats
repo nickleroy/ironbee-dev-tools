@@ -229,8 +229,11 @@ class Main( object ) :
             if len(cmd) == 0 :
                 continue
             if not self._args.execute :
-                print "Not running:", cmd
-                continue
+                if cmd[0] == "make" :
+                    cmd [1:1] = ( "-n", )
+                else :
+                    print "Not running:", cmd
+                    continue
             if self._args.verbose :
                 print "%s: Executing \"%s\"" % (name, str(cmd))
             status = subprocess.call( cmd )
