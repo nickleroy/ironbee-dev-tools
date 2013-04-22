@@ -185,9 +185,26 @@ class Main( object ) :
                     namespace.aggression = values
                 else :
                     namespace.aggression = 1.0
+                if option_string in ("--nice-aggressive", "--na") :
+                    namespace.nice = 10
+        self._parser.set_defaults( aggressive=-1.0 )
         self._parser.add_argument( "--aggressive", "-a",
-                                   action=AggressionAction, dest="aggressive", type=float, default=-1.0, nargs='?',
+                                   action=AggressionAction, type=float, nargs='?',
                                    help="Set the number of make jobs aggressively [<aggression mult>]" )
+        self._parser.add_argument( "--nice-aggressive", "--na",
+                                   action=AggressionAction, type=float, nargs='?',
+                                   help="Like --aggressive, but with default niceness (10)" )
+
+        class NiceAction(argparse.Action):
+            def __call__(self, parser, namespace, values, option_string=None):
+                if values is not None :
+                    namespace.nice = values
+                else :
+                    namespace.nice = 10
+        self._parser.set_defaults( nice=0 )
+        self._parser.add_argument( "--nice",
+                                   action=NiceAction, type=int, nargs='?',
+                                   help="Run make under \"nice\" [<niceness>]" )
 
         self._parser.add_argument( "--execute",
                                    action="store_true", dest="execute", default=True,
@@ -242,7 +259,10 @@ class Main( object ) :
 
     def _BuildTarget( self, target, execute=False ) :
         target.PreExec( self )
-        cmd = [ "/usr/bin/make" ]
+        cmd = [ ]
+        if self._args.nice :
+            cmd += [ "/usr/bin/nice", "-"+str(self._args.nice) ]
+        cmd += [ "/usr/bin/make" ]
         cmd += target.MakeArgs(self._args.jobs)
 
         status = self._RunCommand( cmd, execute=execute )
