@@ -61,7 +61,7 @@ class Main( object ) :
                        "Devel"       : env["QYLS_DEVEL"],
                        "Etc"         : env.get("QYLS_ETC", "${Devel}/etc"),
                        "EtcIn"       : env.get("QYLS_ETC_IN", "${Devel}/etc.in"),
-                       "AtsVer"      : env.get("ATS_VERSION", "3.2.4"),
+                       "AtsVer"      : env.get("ATS_VER", "3.2.4"),
                        "AtsDir"      : env.get("ATS_ROOT",
                                                os.path.join(env["EXT_INSTALL"],
                                                             "trafficserver-${AtsVer}")),
