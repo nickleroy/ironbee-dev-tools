@@ -104,7 +104,7 @@ class Main( object ) :
                                    help="Run ATS under helgrind")
 
         self._parser.add_argument( "--append-tool-arg", "-a",
-                                   action="append", dest="tool_args", default=[],
+                                   action="append", dest="tool_args", type=str, default=[],
                                    help="Add tool-specific argument" )
 
         self._parser.add_argument( "--force-make", "-f",
