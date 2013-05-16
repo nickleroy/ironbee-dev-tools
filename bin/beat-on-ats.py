@@ -70,12 +70,12 @@ class _Main( object ) :
                                    type=int, nargs=2,
                                    help="Set random number of URLs from <min> to <max>" )
 
-        self._parser.add_argument( "--url", "-u",
-                                   action="store", dest="url", default=None,
-                                   help="Set URL (default = http://localhost:<port>)" )
         self._parser.add_argument( "--port", "-p",
                                    action="store", type=int, dest="port", default=8180,
                                    help="Set port number (default = 8180)" )
+        self._parser.add_argument( "--proxy", "-x",
+                                   action="store", dest="proxy", default=None,
+                                   help="Set curl proxy (default = None)" )
 
         self._parser.add_argument( "--pid",
                                    action="store", type=int, dest="pid", default=None,
@@ -111,6 +111,16 @@ class _Main( object ) :
                                    action="store_false", dest="trace",
                                    help="Disable --trace-ascii arg to curl" )
 
+        self._parser.add_argument( "--out-dir",
+                                   action="store", dest="out_dir", default=".",
+                                   help="Specify directory to hold curl output files" )
+        self._parser.add_argument( "--out-files",
+                                   action="store_true", dest="out_files", default=False,
+                                   help="Write curl output to files" )
+        self._parser.add_argument( "--out-null",
+                                   action="store_true", dest="out_null", default=False,
+                                   help="Write curl output to /dev/null" )
+
         self._parser.add_argument( "--execute",
                                    action="store_true", dest="execute", default=True,
                                    help="Enable execution <default>" )
@@ -128,6 +138,14 @@ class _Main( object ) :
                                    action="store", type=str, default=None, nargs='?',
                                    help="Specify URL" )
 
+    def CheckDir( self, label, path ) :
+        if path == "." :
+            return
+        if not os.path.exists(path) :
+            os.makedirs(path)
+        elif not os.path.isdir(path) :
+            parser.error( "%s directory \"%s\" is not a directory"%(label, path) )
+
     def ParseArgs( self ) :
         self._args = self._parser.parse_args()
         if self._args.url is None :
@@ -139,6 +157,8 @@ class _Main( object ) :
             self._max_procs = self._args.max_procs
         else :
             self._max_procs = self._args.num_procs
+        self.CheckDir("Output", self._args.out_dir)
+        self.CheckDir("Trace", self._args.trace_dir)
 
 
     def FindAtsPid( self ) :
@@ -211,20 +231,20 @@ class _Main( object ) :
                 pass
         self._killsig = signal.SIGKILL
 
-    def StartCmd( self, cmd, n=None ) :
+    def StartCmd( self, cmd, label=None, out=None ) :
         if self._args.execute == False :
-            if n is None :
+            if label is None :
                 print "Not executing:", cmd
             else :
-                print "Not executing #%d: %s" % (n, cmd)
+                print "Not executing %s: %s" % (label, cmd)
             return True
         if not self._args.quiet :
-            if n is None :
+            if label is None :
                 print "Executing:", cmd
             else :
-                print "Executing #%d: %s" % (n, cmd)
+                print "Executing %s: %s" % (label, cmd)
         try :
-            p = subprocess.Popen( cmd )
+            p = subprocess.Popen( cmd, stdout=out )
             self._children[p.pid] = p
             return True
         except OSError as e :
@@ -285,12 +305,22 @@ class _Main( object ) :
             print "Forking curl with %s urls '%s' %d times, PID=%d" % \
                 (s, self._args.url, self._args.num_procs, self._args.pid)
 
+        if self._args.out_null or self._args.out_files :
+            dev_null = open("/dev/null", "w")
+
         for proc in range(self._args.num_procs) :
             if self._shutdown :
                 return
             cmd = list(curl)
             if self._args.trace :
-                cmd +=  [ '--trace-ascii', 'ats-trace.%04d'%n ]
+                cmd +=  [ '--trace-ascii',
+                          os.path.join(self._args.trace_dir,'ats-trace.%05d'%proc) ]
+            if self._args.out_null :
+                cmd +=  [ '-o', '/dev/null' ]
+            elif self._args.out_files :
+                cmd +=  [ '-o', os.path.join(self._args.out_dir,'ats-out.%05d'%proc) ]
+            if self._args.proxy is not None :
+                cmd +=  [ '--proxy', self._args.proxy ]
             if len(self._args.random_urls) == 2 :
                 urls = random.randint(self._args.random_urls[0], self._args.random_urls[1])
             else :
@@ -300,7 +330,7 @@ class _Main( object ) :
             started = False
             while started == False :
                 if self._max_procs is None  or  len(self._children) < self._max_procs :
-                    started = self.StartCmd( cmd, proc )
+                    started = self.StartCmd( cmd, label="#%d"%proc, out=dev_null )
                 self.Delay( started )
 
             if self._shutdown :
