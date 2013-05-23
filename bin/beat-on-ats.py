@@ -305,9 +305,7 @@ class _Main( object ) :
             print "Forking curl with %s urls '%s' %d times, PID=%d" % \
                 (s, self._args.url, self._args.num_procs, self._args.pid)
 
-        if self._args.out_null or self._args.out_files :
-            dev_null = open("/dev/null", "w")
-
+        dev_null = open("/dev/null", "w")
         for proc in range(self._args.num_procs) :
             if self._shutdown :
                 return
