@@ -80,6 +80,9 @@ class _Main( object ) :
         self._parser.add_argument( "--new-config",
                                    action="store", dest="new_config", default=None,
                                    help="Cause ATS to log MANY garbage messages done" )
+        self._parser.add_argument( "--create-engine",
+                                   action="store_true", dest="create_engine", default=False,
+                                   help="Create a new IronBee engine" )
         self._parser.add_argument( "--create-probability",
                                    action="store", dest="create_probability", type=float, default=0.0,
                                    help="Set probability to create new IronBee engine" )
@@ -343,6 +346,9 @@ class _Main( object ) :
 
         if self._args.execute and self._args.new_config :
             self.SetCommand( "config:"+self._args.new_config )
+
+        if self._args.execute and self._args.create_engine :
+            self.SetCommand( "create" )
 
         if self._args.execute and self._args.shutdown :
             self.SetCommand( "shutdown" )
