@@ -24,24 +24,6 @@ import signal
 import time
 import random
 
-class _InvalidProcess(BaseException) : pass
-class _Process( object ) :
-    def __init__( self, user, pid, ppid, cmd ) :
-        try :
-            self._user = user 
-            self._pid = int(pid)
-            self._ppid = int(ppid)
-            self._cmd = cmd
-        except ValueError as e :
-            raise _InvalidProcess(e)
-    User   = property(lambda self : self._user)
-    PID    = property(lambda self : self._pid)
-    PPID   = property(lambda self : self._ppid)
-    Cmd    = property(lambda self : self._cmd)
-    IsAts  = property(lambda self : 'traffic_server' in self._cmd)
-    IsGdb  = property(lambda self : 'gdb ' in self._cmd)
-    IsUser = property(lambda self : self._user == os.environ['USER'])
-
 class _Main( object ) :
     def __init__( self ) :
         self._children = { }
@@ -77,9 +59,6 @@ class _Main( object ) :
                                    action="store", type=int, dest="port", default=8180,
                                    help="Set port number (default = 8180)" )
 
-        self._parser.add_argument( "--pid",
-                                   action="store", type=int, dest="pid", default=None,
-                                   help="Set PID of ATS process" )
         self._parser.add_argument( "--alarm",
                                    action="store", type=int, dest="alarm", default=20,
                                    help="Set alarm timeout (default=20s)" )
@@ -94,12 +73,34 @@ class _Main( object ) :
                                    type=float, nargs=2,
                                    help="Set curl delay randomly to from <min> to <max>" )
 
-        self._parser.add_argument( "--signal-usr1", "--usr1",
-                                   action="store_true", dest="sigusr1", default=False,
-                                   help="Enable SIGUSR1 to create new IronBee engine" )
-        self._parser.add_argument( "--signal-usr2", "--usr2",
-                                   action="store_true", dest="sigusr2", default=False,
-                                   help="Enable SIGUSR2 to shut down server" )
+        # Command file and related commands
+        self._parser.add_argument( "--command-file", "-c",
+                                   action="store", dest="command_file", default="/tmp/engine-manager-debug.txt",
+                                   help="Specify location of debug command file" )
+        self._parser.add_argument( "--new-config",
+                                   action="store", dest="new_config", default=None,
+                                   help="Cause ATS to log MANY garbage messages done" )
+        self._parser.add_argument( "--create-probability",
+                                   action="store", dest="create_probability", type=float, default=0.0,
+                                   help="Set probability to create new IronBee engine" )
+        self._parser.add_argument( "--create-always",
+                                   action="store_const", dest="create_prob", const=1.0,
+                                   help="Set probability to create new IronBee engine" )
+        self._parser.add_argument( "--create-never",
+                                   action="store_const", dest="create_prob", const=0.0,
+                                   help="Set probability to create new IronBee engine" )
+        self._parser.add_argument( "--log-crap",
+                                   action="store", dest="log_crap", type=int, default=0,
+                                   help="Cause ATS to log MANY garbage messages done" )
+        self._parser.add_argument( "--shutdown",
+                                   action="store_true", dest="shutdown", default=False,
+                                   help="Cause ATS to shut down engine manager when done" )
+        self._parser.add_argument( "--destroy",
+                                   action="store_true", dest="destroy", default=False,
+                                   help="Cause ATS to destroy engine manager when done" )
+        self._parser.add_argument( "--exit",
+                                   action="store_true", dest="exit", default=False,
+                                   help="Cause ATS to destroy engine manager when done" )
 
         self._parser.add_argument( "--trace-dir",
                                    action="store", dest="trace_dir", default=".",
@@ -139,32 +140,6 @@ class _Main( object ) :
             self._max_procs = self._args.max_procs
         else :
             self._max_procs = self._args.num_procs
-
-
-    def FindAtsPid( self ) :
-        procs = { }
-        cmd = [ 'ps', '-eo', 'user,pid,ppid,cmd' ]
-        for line in subprocess.check_output(cmd).split('\n') :
-            try :
-                (user, pid, ppid, cmd) = re.split('\s+', line, 3)
-                proc = _Process(user, pid, ppid, cmd)
-                procs[proc.PID] = proc
-            except ( _InvalidProcess, ValueError ) :
-                pass
-        pids = [ ]
-        for pid in sorted(procs.keys()) :
-            proc = procs[pid]
-            if proc.IsUser and proc.IsAts and not proc.IsGdb :
-                pids.append(pid)
-        if len(pids) == 0 :
-            print >>sys.stderr, "No ATS processes found"
-            sys.exit(1)
-        elif len(pids) != 1 :
-            print >>sys.stderr, "Too many ATS processes found:"
-            for pid in pids :
-                print procs[pid].User, pid, procs[pid].Cmd
-            sys.exit(1)
-        return pids[0]
 
     def Reaper( self, signum, frame ) :
         count = 0
@@ -231,6 +206,21 @@ class _Main( object ) :
             print cmd, ":", e
             return False
 
+    def RunNc( self ) :
+        cmd = ( "nc", "localhost", str(self._args.port) )
+        null = open("/dev/null", "r")
+        subprocess.call( cmd, stdin=null )
+
+    def SetCommand( self, command ) :
+        try :
+            f = open( self._args.command_file, "w" )
+            f.write(command)
+            f.close()
+            self.RunNc()
+            print "Set command \"%s\"" % command
+        except IOError as e :
+            print >>sys.stderr, "Unable to write to command file \"%s\": %s" % (self._args.command_file, e)
+
     def Delay( self, started ) :
         delay = 0.0
         extra_delay = self._extra_delay;
@@ -263,8 +253,6 @@ class _Main( object ) :
             except IOError as e :
                 print >>sys.stderr, "Sleep failed:", e
                 break
-                #print "Shutting down", e
-                #self.Shutdown( self._killsig, None )
 
     def MainLoop( self ) :
         curl = [ "/usr/bin/curl" ]
@@ -306,8 +294,8 @@ class _Main( object ) :
             if self._shutdown :
                 return
             if self._args.execute:
-                if self._args.sigusr1 :
-                    os.kill( self._args.pid, signal.SIGUSR1 )
+                if random.random() < self._args.create_probability :
+                    self.SetCommand( "create" )
                 pass
 
 
@@ -320,20 +308,32 @@ class _Main( object ) :
                 print "Waiting for %d children" % (pids)
             last = pids
             time.sleep(1.0)
-        if self._args.execute and self._args.sigusr2 :
-            print "Sending first USR2"
-            os.kill( self._args.pid, signal.SIGUSR2 )
-            time.sleep(5.0)
-            print "Sending second USR2"
-            os.kill( self._args.pid, signal.SIGUSR2 )
+
+    def Final( self ) :
+        if self._args.execute and self._args.log_crap :
+            self.SetCommand( "log-crap:"+str(self._args.log_crap) )
+
+        if self._args.execute and self._args.new_config :
+            self.SetCommand( "config:"+self._args.new_config )
+
+        if self._args.execute and self._args.shutdown :
+            self.SetCommand( "shutdown" )
+            if self._args.destroy  or  self._args.exit :
+                time.sleep(2.0)
+
+        if self._args.execute and self._args.destroy :
+            self.SetCommand( "destroy" )
+
+        if self._args.execute and self._args.exit :
+            self.SetCommand( "exit" )
+
 
     def Main( self ) :
         self.ParseArgs()
-        if self._args.pid is None :
-            self._args.pid = self.FindAtsPid( )
-
-        self.MainLoop()
-        self.Wait()
+        if self._args.num_procs :
+            self.MainLoop()
+            self.Wait()
+        self.Final()
 
 main = _Main( )
 main.Main( )
