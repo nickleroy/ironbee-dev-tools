@@ -185,13 +185,13 @@ class Main( object ) :
                     namespace.aggression = values
                 else :
                     namespace.aggression = 1.0
-                if option_string in ("--nice-aggressive", "--na") :
+                if option_string in ("--nice-aggressive", "--na", "-na") :
                     namespace.nice = 10
         self._parser.set_defaults( aggression=-1.0 )
         self._parser.add_argument( "--aggressive", "-a",
                                    action=AggressionAction, type=float, nargs='?',
                                    help="Set the number of make jobs aggressively [<aggression mult>]" )
-        self._parser.add_argument( "--nice-aggressive", "--na",
+        self._parser.add_argument( "--nice-aggressive", "--na", "-na",
                                    action=AggressionAction, type=float, nargs='?',
                                    help="Like --aggressive, but with default niceness (10)" )
 
