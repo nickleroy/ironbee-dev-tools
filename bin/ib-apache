@@ -59,7 +59,7 @@ class Tool( object ) :
 
 
 class Main( object ) :
-    valgrind = ( "${ToolName}", "--tool=${SubTool}", "-v", "-v", "--log-file=${ToolOut}" )
+    valgrind = ( "valgrind", "--tool=${SubTool}", "-v", "-v", "--log-file=${ToolOut}" )
     _CmdPrefixes = {
         "none"     : Tool("none" ),
         "gdb"      : Tool("gdb",      prefix="${ToolName}", tool_args="--args", prog_args="-X"),

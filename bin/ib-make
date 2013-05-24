@@ -1,22 +1,20 @@
 #! /usr/bin/env python
-###########################################################################
-##
-## Copyright(c) 2012 by Nick LeRoy, 310 Jones Ave, Fort Atkinson, WI
-##
-## This program is free software: you can redistribute it and/or modify
-## it under the terms of the GNU General Public License as published by
-## the Free Software Foundation, either version 3 of the License, or
-## (at your option) any later version.
-## 
-## This program is distributed in the hope that it will be useful,
-## but WITHOUT ANY WARRANTY; without even the implied warranty of
-## MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-## GNU General Public License for more details.
-## 
-## You should have received a copy of the GNU General Public License
-## along with this program.  If not, see <http://www.gnu.org/licenses/>.
-##
-###########################################################################
+# ****************************************************************************
+# Licensed to Qualys, Inc. (QUALYS) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# QUALYS licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ****************************************************************************
 import os
 import sys
 import shutil
@@ -163,12 +161,13 @@ class Main( object ) :
         class DoxygenAction(argparse.Action):
             def __call__(self, parser, namespace, values, option_string=None):
                 namespace.doxygen = True
-                if "only" in option_string :
+                if option_string in ( "--doxygen-only", "--docs-only", "-do" ) :
                     namespace.default = False
+                    namespace.install = False
         self._parser.add_argument( "--doxygen", "--docs",
                                    action=DoxygenAction, nargs=0,
                                    help="Build doxygen target" )
-        self._parser.add_argument( "--doxygen-only", "--docs-only",
+        self._parser.add_argument( "--doxygen-only", "--docs-only", "-do",
                                    action=DoxygenAction, nargs=0,
                                    help="Build only doxygen target" )
 
@@ -240,7 +239,6 @@ class Main( object ) :
             self._args.confgen = True
         if (self._args.jobs == 0) :
             self._args.jobs = self._CalcMaxJobs( )
-
 
     def _RunCommand( self, cmd, cwd=None, execute=True, no_exec_flag=None ) :
         fromdir = "" if cwd is None else "from "+cwd
