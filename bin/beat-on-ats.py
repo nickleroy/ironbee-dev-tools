@@ -75,11 +75,12 @@ class _Main( object ) :
 
         # Command file and related commands
         self._parser.add_argument( "--command-file", "-c",
-                                   action="store", dest="command_file", default="/tmp/engine-manager-debug.txt",
+                                   action="store", dest="command_file",
+                                   default="/tmp/engine-manager-debug.txt",
                                    help="Specify location of debug command file" )
         self._parser.add_argument( "--new-config",
                                    action="store", dest="new_config", default=None,
-                                   help="Cause ATS to log MANY garbage messages done" )
+                                   help="Update the configuration file path" )
         self._parser.add_argument( "--create-engine",
                                    action="store_true", dest="create_engine", default=False,
                                    help="Create a new IronBee engine" )
