@@ -56,20 +56,20 @@ class _Main( object ) :
                  ("--manager-create-engine", "--ce"),
                  "Create a new IronBee engine" ),
         Command( "manager-shutdown",
-                 ("--manager-shutdown", "-ms"),
+                 ("--manager-shutdown", "--ms"),
                  "Shut down the engine manager" ),
         Command( "manager-destroy",
-                 ("--manager-destroy", "-md"),
+                 ("--manager-destroy", "--md"),
                  "Destroy the engine manager" ),
         Command( "server-log-crap",
-                 ("--server-log-crap", "-lc"),
+                 ("--server-log-crap", "--lc"),
                  "Cause server to log <n> garbage messages",
                  _type=int, _nargs=1 ),
         Command( "server-flush",
                  ("--server-log-flush", "--flush"),
                  "Cause server to flush the log messages" ),
         Command( "server-exit",
-                 ("--server-exit", "-se"),
+                 ("--server-exit", "--se"),
                  "Cause server to exit" ),
     )
 
@@ -83,7 +83,7 @@ class _Main( object ) :
         # Command file
         self._parser.add_argument( "--command-file", "-c",
                                    action="store", dest="command_file",
-                                   default="/tmp/engine-manager-debug.txt",
+                                   default="/tmp/ats-engine-manager.txt",
                                    help="Specify location of debug command file" )
         self._parser.set_defaults( command=None )
         class CommandAction(argparse.Action):
@@ -128,7 +128,8 @@ class _Main( object ) :
     def ParseArgs( self ) :
         self._args = self._parser.parse_args()
         if self._args.server != "ATS" :
-            self._parser.error( 'Currently only "ATS" server supported ("%s" specified)' % self_args.server )
+            self._parser.error( 'Currently only "ATS" server supported ("%s" specified)' %
+                                (self_args.server) )
 
     def RunNc( self ) :
         cmd = ( "nc", "localhost", str(self._args.port) )
@@ -141,9 +142,11 @@ class _Main( object ) :
             f.write(command)
             f.close()
             self.RunNc()
-            print "Set command \"%s\"" % command
+            if not self._args.quiet :
+                print "Set command \"%s\" to \"%s\"" % (command, self._args.command_file)
         except IOError as e :
-            print >>sys.stderr, "Unable to write to command file \"%s\": %s" % (self._args.command_file, e)
+            print >>sys.stderr, "Unable to write to command file \"%s\": %s" % \
+                (self._args.command_file, e)
 
     def SendCommands( self ) :
         if self._args.execute :
