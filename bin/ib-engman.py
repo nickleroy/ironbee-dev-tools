@@ -64,6 +64,7 @@ class _Main( object ) :
         Command( "new-config",
                  ("--new-config",),
                  "Update the configuration file path" ),
+
         Command( "manager-create-engine",
                  ("--manager-create-engine", "--mce"),
                  "Create a new IronBee engine" ),
@@ -72,8 +73,9 @@ class _Main( object ) :
                  "Shut down the engine manager" ),
         Command( "manager-destroy",
                  ("--manager-destroy", "--md"),
-                 "Destroy the engine manager",
-                 _type=str, _nargs='?', _choices=("idle","non-current","all"), ),
+                 "Attempt to destroy the engine manager",
+                 _type=str, _nargs='?', _choices=("inactive","non-current","all"), ),
+
         Command( "server-log-flush",
                  ("--server-log-flush", "--flush"),
                  "Cause server to flush the log messages" ),
@@ -120,7 +122,7 @@ class _Main( object ) :
                                    choices=("ATS", "Apache", "NGINX"),
                                    help="Specify server type" )
         self._parser.add_argument( "--server-port", "-p",
-                                   action="store", dest="port", type=int, default=8181,
+                                   action="store", dest="port", type=int, default=8180,
                                    help="Specify server port" )
 
         self._parser.add_argument( "--execute",
@@ -154,7 +156,7 @@ class _Main( object ) :
             f.close()
             self.RunNc()
             if not self._args.quiet :
-                print "Set command \"%s\" to \"%s\"" % (command, self._args.command_file)
+                print "Wrote command \"%s\" to \"%s\"" % (command, self._args.command_file)
         except IOError as e :
             print >>sys.stderr, "Unable to write to command file \"%s\": %s" % \
                 (self._args.command_file, e)
