@@ -28,24 +28,36 @@ _main = None
 
 class _Main( object ) :
     class Command( object ) :
-        def __init__( self, _name, _args, _help, _type=None, _nargs=0 ) :
+        def __init__( self, _name, _args, _help, _type=None, _nargs=0, _choices=None ) :
             assert type(_name) == str
             assert type(_args) == tuple
             assert type(_help) == str
             assert _type is None or type(_type) == type
-            assert type(_nargs) == int
+            assert type(_nargs) in (int, str)
 
             self._name = _name
             self._args = _args
             self._help = _help
             self._type = _type
             self._nargs = _nargs
+            self._choices = _choices
         Name = property( lambda self : self._name )
         Args = property( lambda self : self._args )
-        Command = property
         Help = property( lambda self : self._help )
         Type = property( lambda self : self._type )
         NumArgs = property( lambda self : self._nargs )
+        Choices = property( lambda self : self._choices )
+
+        def Command( self, args ) :
+            if args is None or self._nargs is 0:
+                return self._name
+            elif type(args) in (list,tuple) :
+                return self._name+":"+":".join([str(a) for a in args])
+            else :
+                return self._name+":"+str(args)
+
+        def __str__( self ) :
+            return self._name
 
     # Commands to send to server
     _commands = (
@@ -53,19 +65,16 @@ class _Main( object ) :
                  ("--new-config",),
                  "Update the configuration file path" ),
         Command( "manager-create-engine",
-                 ("--manager-create-engine", "--ce"),
+                 ("--manager-create-engine", "--mce"),
                  "Create a new IronBee engine" ),
         Command( "manager-shutdown",
                  ("--manager-shutdown", "--ms"),
                  "Shut down the engine manager" ),
         Command( "manager-destroy",
                  ("--manager-destroy", "--md"),
-                 "Destroy the engine manager" ),
-        Command( "server-log-crap",
-                 ("--server-log-crap", "--lc"),
-                 "Cause server to log <n> garbage messages",
-                 _type=int, _nargs=1 ),
-        Command( "server-flush",
+                 "Destroy the engine manager",
+                 _type=str, _nargs='?', _choices=("idle","non-current","all"), ),
+        Command( "server-log-flush",
                  ("--server-log-flush", "--flush"),
                  "Cause server to flush the log messages" ),
         Command( "server-exit",
@@ -92,7 +101,8 @@ class _Main( object ) :
                     parser.error( "Multiple commands \"\%s\"" % (option_string) )
                 for command in _main._commands :
                     if option_string in command.Args :
-                        namespace.command = command.Name
+                        namespace.command = command
+                        namespace.command_args = values
                         break
                 else :
                     parser.error( "Invalid command \"%s\"" % (option_string) )
@@ -100,9 +110,10 @@ class _Main( object ) :
         for command in self._commands :
             args = [a for a in command.Args]
             command_group.add_argument( *args,
-                                        action=CommandAction,
-                                        type=command.Type, nargs=command.NumArgs,
-                                        help=command.Help )
+                                         action=CommandAction,
+                                         type=command.Type, nargs=command.NumArgs,
+                                         choices=command.Choices,
+                                         help=command.Help )
 
         self._parser.add_argument( "--server",
                                    action="store", dest="server", type=str, default="ATS",
@@ -149,8 +160,11 @@ class _Main( object ) :
                 (self._args.command_file, e)
 
     def SendCommands( self ) :
+        command = self._args.command.Command(self._args.command_args)
         if self._args.execute :
-            self.SendCommand( self._args.command )
+            self.SendCommand( self._args.command.Command(self._args.command_args) )
+        else :
+            print "Not sending command \"%s\"" % ( command )
 
     def Main( self ) :
         self.ParseArgs()

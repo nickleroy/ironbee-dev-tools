@@ -93,9 +93,6 @@ class _Main( object ) :
         self._parser.add_argument( "--create-never",
                                    action="store_const", dest="create_prob", const=0.0,
                                    help="Set probability to create new IronBee engine" )
-        self._parser.add_argument( "--log-crap",
-                                   action="store", dest="log_crap", type=int, default=0,
-                                   help="Cause ATS to log MANY garbage messages done" )
         self._parser.add_argument( "--shutdown",
                                    action="store_true", dest="shutdown", default=False,
                                    help="Cause ATS to shut down engine manager when done" )
@@ -235,16 +232,6 @@ class _Main( object ) :
         null = open("/dev/null", "r")
         subprocess.call( cmd, stdin=null )
 
-    def SetCommand( self, command ) :
-        try :
-            f = open( self._args.command_file, "w" )
-            f.write(command)
-            f.close()
-            self.RunNc()
-            print "Set command \"%s\"" % command
-        except IOError as e :
-            print >>sys.stderr, "Unable to write to command file \"%s\": %s" % (self._args.command_file, e)
-
     def Delay( self, started ) :
         delay = 0.0
         extra_delay = self._extra_delay;
@@ -295,7 +282,7 @@ class _Main( object ) :
             else :
                 s = str(self._args.urls)
             print "Forking curl with %s urls '%s' %d times, PID=%d" % \
-                (s, self._args.url, self._args.num_procs, self._args.pid)
+                (s, self._args.url, self._args.num_procs, os.getpid())
 
         dev_null = open("/dev/null", "w")
         for proc in range(self._args.num_procs) :
@@ -342,26 +329,18 @@ class _Main( object ) :
             time.sleep(1.0)
 
     def Final( self ) :
-        if self._args.execute and self._args.log_crap :
-            self.SetCommand( "log-crap:"+str(self._args.log_crap) )
-
-        if self._args.execute and self._args.new_config :
-            self.SetCommand( "config:"+self._args.new_config )
-
         if self._args.execute and self._args.create_engine :
-            self.SetCommand( "create" )
+            subprocess.call( ['ib-engman.py', '--manager-create-engine'] )
 
         if self._args.execute and self._args.shutdown :
-            self.SetCommand( "shutdown" )
-            if self._args.destroy  or  self._args.exit :
-                time.sleep(2.0)
+            subprocess.call( ['ib-engman.py', '--manager-shutdown'] )
 
         if self._args.execute and self._args.destroy :
-            self.SetCommand( "destroy" )
+            subprocess.call( ['ib-engman.py', '--manager-destroy', 'idle'] )
+            time.sleep(600.0)
 
         if self._args.execute and self._args.exit :
-            self.SetCommand( "exit" )
-
+            subprocess.call( ['ib-engman.py', '--server-exit'] )
 
     def Main( self ) :
         self.ParseArgs()
