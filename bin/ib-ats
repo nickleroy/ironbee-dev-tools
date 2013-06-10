@@ -69,7 +69,8 @@ class Main( object ) :
                        "AtsLog"      : "${AtsVar}/log/trafficserver",
                        "AtsEtcIn"    : "${EtcIn}/trafficserver/working/${AtsVer}",
                        "AtsEtc"      : "${Etc}/trafficserver",
-                       "Prog"        : "${AtsDir}/bin/traffic_server",
+                       "Prog1"       : "${AtsDir}/bin/traffic_server",
+                       "Prog2"       : "${AtsDir}/bin/traffic_server.bin",
                        "Trace"       : 'http.*|dns.*|http_hdrs|sdk|ironbee',
                        "Args"        : [ '-T${Trace}', '-K' ],
                        "MakeArgs"    : [ ],
@@ -168,6 +169,14 @@ class Main( object ) :
             self._defs["Output"] = self._args.output
         if self._args.force_make :
             self._defs["MakeArgs"].append("-B")
+        for p in ("${Prog1}", "${Prog2}") :
+            path = self.ExpandStr( p )
+            if not os.path.islink( path ):
+                self._defs["Prog"] = p
+                break
+        else :
+            self._parser.error( "No ATS binary found" )
+
 
     def Expand( self, args ) :
         loops = 0
