@@ -92,6 +92,60 @@ class Targets( object ) :
                 yield target
         return
 
+class BuildTimer( object ) :
+    def __init__( self, target, start ) :
+        self._target = target
+        self._started = None
+        self._finished = None
+        if start :
+            self.Start()
+    Started = property( lambda self : self._started )
+    Finished = property( lambda self : self._finished )
+    def Start( self ) :
+        self._started = time.time()
+    def Stop( self, _print ) :
+        self._finished = time.time()
+        if _print :
+            self.Print( )
+    def _FormatTime( self, seconds ) :
+        return time.strftime( "%H:%M:%S", time.localtime(seconds) )
+    def Print( self ) :
+        assert self._started is not None and self._finished is not None
+        print "%s: started at %s, finished at %s, elapsed %.1fs" % \
+            (self._target.Name,
+             self._FormatTime(self._started),
+             self._FormatTime(self._finished),
+             (self._finished - self._started))
+
+class BuildTimers( object ) :
+    def __init__( self, enable ) :
+        self._timers = []
+        self._enable = enable
+    def AddTarget( self, target, start ) :
+        if self._enable :
+            timer = BuildTimer( target, start )
+            self._timers.append( timer )
+            return timer
+        return None
+    def GetTimer( self, n ) :
+        assert n is not None
+        try :
+            return self._timers[n]
+        except IndexError :
+            return None
+    def StopTimer( self, n ) :
+        timer = self.GetTimer( n )
+        if timer is not None :
+            timer.Stop( False )
+    def PrintTimer( self, timer=None, n=None ) :
+        if timer is None :
+            timer = self.GetTimer( n )
+        if timer is not None :
+            timer.Print()
+    def PrintAll( self ) :
+        for timer in sorted( self._timers, key=lambda t : t.Finished ) :
+            self.PrintTimer( timer )
+
 class Main( object ) :
     @classmethod
     def InitMain( cls ) :
@@ -247,8 +301,6 @@ class Main( object ) :
             self._args.confgen = True
         if self._args.jobs == 0 :
             self._args.jobs = self._CalcMaxJobs( )
-        if not self._args.execute :
-            self._args.timing = False
 
     def _RunCommand( self, cmd, cwd=None, execute=True, no_exec_flag=None ) :
         fromdir = "" if cwd is None else "from "+cwd
@@ -265,9 +317,6 @@ class Main( object ) :
         status = subprocess.call( cmd, cwd=cwd )
         return status
 
-    def _FormatTime( self, seconds ) :
-        return time.strftime( "%H:%M:%S", time.localtime(seconds) )
-
     def _BuildTarget( self, target, execute=False ) :
         target.PreExec( self )
         cmd = [ ]
@@ -276,23 +325,19 @@ class Main( object ) :
         cmd += [ "/usr/bin/make" ]
         cmd += target.MakeArgs(self._args.jobs)
 
-        started = time.time()
         status = self._RunCommand( cmd, execute=execute )
-        finished = time.time()
         if status != 0 :
             sys.exit( status )
-        if self._args.timing :
-            print "Target %s: started at %s, finished at %s, elapsed %.1fs" % \
-                (target.Name, self._FormatTime(started), self._FormatTime(finished), finished - started)
 
     def _BuildAll( self, execute ) :
-        started = time.time()
+        timers = BuildTimers( execute and self._args.timing )
+        timers.AddTarget( Target('BUILD'), True )
         for target in self._targets.Targets( lambda target:target.Enabled ) :
+            timers.AddTarget( target, True )
             self._BuildTarget( target, execute=execute )
-        finished = time.time()
-        if self._args.timing :
-            print "All: started at %s, finished at %s, elapsed %.1fs" % \
-                (self._FormatTime(started), self._FormatTime(finished), finished - started)
+            timers.StopTimer( -1 )
+        timers.StopTimer( 0 )
+        timers.PrintAll()
 
     def _Confirm( self, what, prefix=None ) :
         if not self._args.force :
