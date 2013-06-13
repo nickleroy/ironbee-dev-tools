@@ -222,7 +222,7 @@ class Main( object ) :
         self._parser.add_argument( "--doxygen", "--docs",
                                    action=DoxygenAction, nargs=0,
                                    help="Build doxygen target" )
-        self._parser.add_argument( "--doxygen-only", "--docs-only", "-do",
+        self._parser.add_argument( "--doxygen-only", "--docs-only", "--do",
                                    action=DoxygenAction, nargs=0,
                                    help="Build only doxygen target" )
 
