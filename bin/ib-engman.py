@@ -30,13 +30,13 @@ class _Main( object ) :
     class Command( object ) :
         def __init__( self, _name, _args, _help, _type=None, _nargs=0, _choices=None ) :
             assert type(_name) == str
-            assert type(_args) == tuple
+            assert type(_args) in (tuple,str)
             assert type(_help) == str
             assert _type is None or type(_type) == type
             assert type(_nargs) in (int, str)
 
             self._name = _name
-            self._args = _args
+            self._args = _args if type(_args) == tuple else (_args,)
             self._help = _help
             self._type = _type
             self._nargs = _nargs
@@ -66,31 +66,33 @@ class _Main( object ) :
                  "Update the configuration file path" ),
 
         Command( "manager-create-engine",
-                 ("--manager-create-engine", "--create"),
+                 ("--create"),
                  "Create a new IronBee engine" ),
         Command( "manager-disable-current",
-                 ("--manager-disable-current", "--disable"),
+                 ("--disable"),
                  "Disable the engine manager's current engine" ),
         Command( "manager-cleanup-engines",
-                 ("--manager-cleanup-engines", "--cleanup"),
+                 ("--cleanup"),
                  "Disable the engine manager's current engine" ),
         Command( "manager-destroy-engines",
-                 ("--manager-destroy-engines", "--destroy-engines"),
+                 ("--destroy"),
                  "Destroy engines",
                  _type=str, _nargs='?', _choices=("inactive","all"), ),
-        Command( "manager-destroy",
-                 ("--manager-destroy","--destroy"),
-                 "Attempt to destroy the engine manager",
-                 _type=str, _nargs='?', _choices=("inactive","all","kill"), ),
 
+        Command( "server-shutdown-manager",
+                 ("--shutdown"),
+                 "Destroy inactive engines and the manager if engine count is zero"),
+        Command( "server-manager-destroy",
+                 ("--destroy-manager",),
+                 "Destroy the engine manager"),
         Command( "server-create-manager",
-                 ("--server-create-manager", "--create-manager"),
-                 "Cause server to exit" ),
+                 ("--create-manager"),
+                 "Create a new engine manager" ),
         Command( "server-log-flush",
-                 ("--server-log-flush", "--flush"),
+                 ("--flush"),
                  "Cause server to flush the log messages" ),
         Command( "server-exit",
-                 ("--server-exit", "--se"),
+                 ("--exit"),
                  "Cause server to exit" ),
 
         Command( "nop",
