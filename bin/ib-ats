@@ -49,9 +49,10 @@ class Main( object ) :
         "gdb"      : Tool("gdb",      prefix=("${ToolName}", "--args") ),
         "strace"   : Tool("strace",   prefix=("${ToolName}", "-o", "${ToolOut}") ),
         "valgrind" : Tool("valgrind",
-                          prefix=valgrind + ("--leak-check=full",),
+                          prefix=valgrind + ('--leak-check=full', '--show-reachable=yes'),
                           defs={"SubTool":"memcheck"}),
-        "helgrind" : Tool("helgrind", prefix=valgrind, defs={"SubTool":"helgrind"}),
+        "helgrind" : Tool("helgrind", prefix=valgrind,
+                          defs={"SubTool":"helgrind"}),
         }
 
     def __init__( self ) :
