@@ -73,7 +73,7 @@ class _Main( object ) :
                  "Disable the engine manager's current engine" ),
         Command( "manager-cleanup-engines",
                  ("--cleanup"),
-                 "Disable the engine manager's current engine" ),
+                 "Cleanup inative engines" ),
         Command( "manager-destroy-engines",
                  ("--destroy"),
                  "Destroy engines",
