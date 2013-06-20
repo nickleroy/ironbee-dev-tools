@@ -17,12 +17,9 @@
 # ****************************************************************************
 import os
 import sys
-import re
 import subprocess
 import argparse
 import signal
-import time
-import random
 
 _main = None
 
@@ -160,9 +157,14 @@ class _Main( object ) :
             self._parser.error( 'Currently only "ATS" server supported ("%s" specified)' %
                                 (self_args.server) )
 
+    def Shutdown( self, signum, frame ):
+        print "nc timed out: Giving up"
+        os.kill( os.getpid(), signal.SIGTERM )
+
     def RunNc( self ) :
         cmd = ( "nc", "localhost", str(self._args.port) )
         null = open("/dev/null", "r")
+        signal.alarm(30)
         subprocess.call( cmd, stdin=null )
 
     def SendCommand( self, command ) :
@@ -178,6 +180,7 @@ class _Main( object ) :
                 (self._args.command_file, e)
 
     def SendCommands( self ) :
+        signal.signal(signal.SIGALRM, self.Shutdown)
         command = self._args.command.Command(self._args.command_args)
         if self._args.execute :
             self.SendCommand( self._args.command.Command(self._args.command_args) )
