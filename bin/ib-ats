@@ -38,48 +38,58 @@ class Tool( object ) :
 
     Prefix   = property( lambda self : self._prefix )
     Defs     = property( lambda self : self._defs )
+    Args     = property( lambda self : self._defs.get('Args',None) )
     ToolName = property( lambda self : self._defs["ToolName"] )
     ToolOut  = property( lambda self : self._defs.get("ToolOut", None) )
 
+class IbAtsException(BaseException) : pass
 
 class Main( object ) :
     valgrind = ( "valgrind", "--tool=${SubTool}", "-v", "-v", "--log-file=${ToolOut}" )
     _CmdPrefixes = {
-        "none"     : Tool("none" ),
-        "gdb"      : Tool("gdb",      prefix=("${ToolName}", "--args") ),
-        "strace"   : Tool("strace",   prefix=("${ToolName}", "-o", "${ToolOut}") ),
-        "valgrind" : Tool("valgrind",
-                          prefix=valgrind + ('--leak-check=full', '--show-reachable=yes'),
-                          defs={"SubTool":"memcheck"}),
-        "helgrind" : Tool("helgrind", prefix=valgrind,
-                          defs={"SubTool":"helgrind"}),
+        "none"          : Tool("none" ),
+        "gdb"           : Tool("gdb",
+                               prefix=("${ToolName}", "--args") ),
+        "gdb-core"      : Tool("gdb",
+                               prefix=("${ToolName}", ),
+                               defs={"Args":"${CoreFile}"} ),
+        "strace"        : Tool("strace",
+                               prefix=("${ToolName}", "-o", "${ToolOut}") ),
+        "valgrind"      : Tool("valgrind",
+                               prefix=valgrind + ("--leak-check=full", "--show-reachable=yes"),
+                               defs={"SubTool":"memcheck"}),
+        "helgrind"      : Tool("helgrind",
+                               prefix=valgrind,
+                               defs={"SubTool":"helgrind"}),
         }
 
     def __init__( self ) :
         env = os.environ
-        self._defs = { "PID"         : os.getpid(),
-                       "Run"         : "${PID}",
-                       "Devel"       : env["QYLS_DEVEL"],
-                       "Etc"         : env.get("QYLS_ETC", "${Devel}/etc"),
-                       "EtcIn"       : env.get("QYLS_ETC_IN", "${Devel}/etc.in"),
-                       "AtsVer"      : env.get("ATS_VERSION", "3.2.4"),
-                       "AtsDir"      : env.get("ATS_ROOT",
-                                               os.path.join(env["EXT_INSTALL"],
-                                                            "trafficserver-${AtsVer}")),
-                       "AtsVar"      : "${AtsDir}/var",
-                       "AtsLog"      : "${AtsVar}/log/trafficserver",
-                       "AtsEtcIn"    : "${EtcIn}/trafficserver/working/${AtsVer}",
-                       "AtsEtc"      : "${Etc}/trafficserver",
-                       "Prog1"       : "${AtsDir}/bin/traffic_server",
-                       "Prog2"       : "${AtsDir}/bin/traffic_server.bin",
-                       "Trace"       : 'http.*|dns.*|http_hdrs|sdk|ironbee',
-                       "Args"        : [ '-T${Trace}', '-K' ],
-                       "MakeArgs"    : [ ],
-                       "Cmd"         : [ "${Prog}", "${Args}" ],
-                       "IbEtc"       : "${EtcIn}/ironbee",
-                       "PreCmds"     : { "ATS" : ["make", "-C", "${AtsEtcIn}", "${MakeArgs}"],
-                                         "IB"  : ["make", "-C", "${IbEtc}", "${MakeArgs}"], },
-                       }
+        self._defs = {
+            "PID"         : os.getpid(),
+            "Run"         : "${PID}",
+            "Devel"       : env["QYLS_DEVEL"],
+            "Etc"         : env.get("QYLS_ETC", "${Devel}/etc"),
+            "EtcIn"       : env.get("QYLS_ETC_IN", "${Devel}/etc.in"),
+            "AtsVer"      : env.get("ATS_VERSION", "3.2.4"),
+            "AtsDir"      : env.get("ATS_ROOT",
+                                    os.path.join(env["EXT_INSTALL"],
+                                                 "trafficserver-${AtsVer}")),
+            "AtsVar"      : "${AtsDir}/var",
+            "AtsLog"      : "${AtsVar}/log/trafficserver",
+            "AtsEtcIn"    : "${EtcIn}/trafficserver/working/${AtsVer}",
+            "AtsEtc"      : "${Etc}/trafficserver",
+            "Prog1"       : "${AtsDir}/bin/traffic_server",
+            "Prog2"       : "${AtsDir}/bin/traffic_server.bin",
+            "Trace"       : 'http.*|dns.*|http_hdrs|sdk|ironbee',
+            "Args"        : [ '-T${Trace}', '-K' ],
+            "MakeArgs"    : [ ],
+            "Cmd"         : [ "${Prog}", "${Args}" ],
+            "IbEtc"       : "${EtcIn}/ironbee",
+            "PreCmds"     : { "ATS" : ["make", "-C", "${AtsEtcIn}", "${MakeArgs}"],
+                              "IB"  : ["make", "-C", "${IbEtc}", "${MakeArgs}"], },
+            "LastFile"    : '.ib-ats.last',
+            }
         self._parser = argparse.ArgumentParser( description="Run ATS with IronBee",
                                                 prog="ib-ats" )
 
@@ -92,6 +102,19 @@ class Main( object ) :
         self._parser.add_argument( "--gdb",
                                    action="store_const", dest="tool", const="gdb",
                                    help="Run ATS under gdb" )
+
+        self._parser.set_defaults( require_core=False )
+        class CoreAction(argparse.Action):
+            def __call__(self, parser, namespace, values, option_string=None):
+                namespace.tool = "gdb-core"
+                namespace.precmds = False
+                namespace.write_last = False
+                namespace.require_core = True
+                if values[0] != '-' :
+                    namespace.defs.append( 'CoreFile', values[0] )
+        self._parser.add_argument( "--core",
+                                   action=CoreAction, nargs=1,
+                                   help="Specify core file or \"-\" for last" )
         self._parser.add_argument( "--strace",
                                    action="store_const", dest="tool",
                                    const="strace",
@@ -124,6 +147,17 @@ class Main( object ) :
         self._parser.add_argument( "--clean", "-c",
                                    action="store_true", dest="clean", default=False,
                                    help="Clean log files before starting ATS")
+
+        self._parser.add_argument( "--disable-precmds",
+                                   action="store_false", dest="precmds", default=True,
+                                   help="Disable running of pre-commands")
+        self._parser.add_argument( "--read-last",
+                                   action="store", dest="read_last",
+                                   nargs=1, type=bool, default=True,
+                                   help="Enable/disable reading of the last file")
+        self._parser.add_argument( "--write-last",
+                                   action="store", dest="write_last", default=True,
+                                   help="Enable / Disable writing of last file")
 
         self._parser.set_defaults( defs = [] )
         class StrAction(argparse.Action):
@@ -164,6 +198,8 @@ class Main( object ) :
         for name,value in self._args.defs :
             self._defs[name] = value
         self._tool = self._CmdPrefixes[self._args.tool]
+        if self._tool.Args is not None :
+            self._defs['Args'] = self._tool.Args
         if self._args.clean :
             self._defs["PreCmds"]["Clean"] = [ "/bin/rm", "${AtsLog}/*" ]
         if self._args.output is not None :
@@ -178,6 +214,30 @@ class Main( object ) :
         else :
             self._parser.error( "No ATS binary found" )
 
+        if self._args.read_last :
+            t = self._defs.get( 'LastFile' )
+            if t is not None :
+                fpath = self.ExpandStr(t)
+                try :
+                    self.ReadDefsFile( fpath )
+                except IbAtsException as e :
+                    print >>sys.stderr, "Failed to read last file", fpath, ":", e
+        if self._args.require_core  and  not self._defs.get( 'CoreFile', None ) is None :
+            self._parser.error( "No core file specified" )
+            
+
+    def ReadDefsFile( self, fpath ) :
+        try :
+            n = 0
+            f = open( fpath )
+            for n, line in enumerate(f) :
+                name, value = line.rstrip().split( '=', 1 )
+                self._defs[name.strip()] = value
+            f.close()
+        except IOError as e :
+            raise IbAtsException(e)
+        except ValueError :
+            raise IbAtsException("Failed to parse line %d" % (n) )
 
     def Expand( self, args ) :
         loops = 0
@@ -233,6 +293,8 @@ class Main( object ) :
         
 
     def RunPre( self ) :
+        if not self._args.precmds :
+            return
         cmds = self._defs["PreCmds"]
         for name, cmd in cmds.items() :
             cmd = self.Glob(self.Expand(cmd))
@@ -291,8 +353,26 @@ class Main( object ) :
             status = 0
         if status :
             print "Exit status is", status
-        if self._tool.ToolOut is not None :
-            print self._tool.ToolName, "output is in", self.ExpandStr(self._tool.ToolOut)
+        tool_out = None if self._tool.ToolOut is None else self.ExpandStr(self._tool.ToolOut)
+        if tool_out is not None :
+            print self._tool.ToolName, "output is in", tool_out
+
+        if not self._args.read_last :
+            return
+        try :
+            f = open( '.ib-ats.last', 'w' )
+            print >>f, "LastPid=", self.ExpandStr( '${PID}' )
+            print >>f, "LastRun=", self.ExpandStr( '${Run}' )
+            if tool_out is not None :
+                cores = glob.glob(tool_out+".core*")
+                for core in cores :
+                    print >>f, "CoreFile="+core
+            print f, "LastTool="+self._tool.ToolName
+            if tool_out is not None :
+                print f, "LastToolOut="+tool_out
+            f.close()
+        except IOError as e :
+            print "Failed to write to last file:", e
 
     def PrintTable( self ) :
         for name, value in self._defs.items( ) :
