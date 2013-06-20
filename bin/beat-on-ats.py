@@ -72,6 +72,9 @@ class _Main( object ) :
                                    action="store", dest="random_delay", default=[],
                                    type=float, nargs=2,
                                    help="Set curl delay randomly to from <min> to <max>" )
+        self._parser.add_argument( "--rate-limit",
+                                   action="store", dest="rate_limit", default=None,
+                                   help="Set the curl rate limit (default=None)" )
 
         # Command file and related commands
         self._parser.add_argument( "--command-file", "-c",
@@ -81,27 +84,31 @@ class _Main( object ) :
         self._parser.add_argument( "--new-config",
                                    action="store", dest="new_config", default=None,
                                    help="Update the configuration file path" )
-        self._parser.add_argument( "--create-engine",
-                                   action="store_true", dest="create_engine", default=False,
-                                   help="Create a new IronBee engine" )
-        self._parser.add_argument( "--create-probability",
-                                   action="store", dest="create_probability", type=float, default=0.0,
-                                   help="Set probability to create new IronBee engine" )
-        self._parser.add_argument( "--create-always",
-                                   action="store_const", dest="create_prob", const=1.0,
-                                   help="Set probability to create new IronBee engine" )
+
+        class CreateAction(argparse.Action):
+            def __call__(self, parser, namespace, values, option_string=None):
+                try :
+                    if values == 'yes' :
+                        namespace.create = 1.0
+                    elif values == "no" :
+                        namespace.create = 0.0
+                    else :
+                        namespace.create = float(values)
+                except ValueError :
+                    parser.error( "Invalid create value '"+s+"'" )
+        self._parser.add_argument( "--create",
+                                   action="store", dest="create", default=0.0, nargs=1,
+                                   help="Set probability to create new IronBee engine [yes, no, (0.0 - 1.0)]" )
+
         self._parser.add_argument( "--create-never",
-                                   action="store_const", dest="create_prob", const=0.0,
+                                   action="store_const", dest="create", const=0.0,
                                    help="Set probability to create new IronBee engine" )
         self._parser.add_argument( "--shutdown",
                                    action="store_true", dest="shutdown", default=False,
-                                   help="Cause ATS to shut down engine manager when done" )
-        self._parser.add_argument( "--destroy",
-                                   action="store_true", dest="destroy", default=False,
-                                   help="Cause ATS to destroy engine manager when done" )
+                                   help="When done: cause server to shut down engine manager" )
         self._parser.add_argument( "--exit",
                                    action="store_true", dest="exit", default=False,
-                                   help="Cause ATS to destroy engine manager when done" )
+                                   help="When done: cause server to shutdown" )
 
         self._parser.add_argument( "--trace-dir",
                                    action="store", dest="trace_dir", default=".",
@@ -194,7 +201,8 @@ class _Main( object ) :
         signal.signal(signal.SIGALRM, self.Shutdown)
         signal.alarm( self._args.alarm )
         pids = sorted(self._children.keys())
-        if len(pids) == 0 :
+        if len(pids) == 0  and  not self._nc_running :
+            print "Idle: bye!"
             sys.exit(0)
         if not self._args.quiet :
             print "Signal %d: Sending signal %d to %d children" % (signum, self._killsig, len(pids))
@@ -221,6 +229,8 @@ class _Main( object ) :
                 print "Executing %s: %s" % (label, cmd)
         try :
             p = subprocess.Popen( cmd, stdout=out )
+            if not self._args.quiet :
+                print "Created child", p.pid
             self._children[p.pid] = p
             return True
         except OSError as e :
@@ -230,7 +240,11 @@ class _Main( object ) :
     def RunNc( self ) :
         cmd = ( "nc", "localhost", str(self._args.port) )
         null = open("/dev/null", "r")
-        subprocess.call( cmd, stdin=null )
+        self._nc_running = True
+        s = subprocess.call( cmd, stdin=null )
+        self._nc_running = False
+        if s != 0 :
+            self.Shutdown( signal.SIGALRM, None )
 
     def Delay( self, started ) :
         delay = 0.0
@@ -267,8 +281,13 @@ class _Main( object ) :
 
     def MainLoop( self ) :
         curl = [ "/usr/bin/curl" ]
-        self._extra_delay = 0.0
+        if self._args.rate_limit is not None :
+            curl += ['--limit-rate', self._args.rate_limit ]
+        if self._args.verbose < 2 :
+            curl += ['-s']
 
+        self._nc_running = False
+        self._extra_delay = 0.0
         self._killsig = signal.SIGTERM
         signal.signal(signal.SIGCHLD, self.Reaper)
         signal.signal(signal.SIGALRM, self.Shutdown)
@@ -313,8 +332,8 @@ class _Main( object ) :
             if self._shutdown :
                 return
             if self._args.execute:
-                if random.random() < self._args.create_probability :
-                    self.SetCommand( "create" )
+                if random.random() < self._args.create :
+                    subprocess.call( ['ib-engman.py', '--create'] )
                 pass
 
 
@@ -329,18 +348,13 @@ class _Main( object ) :
             time.sleep(1.0)
 
     def Final( self ) :
-        if self._args.execute and self._args.create_engine :
-            subprocess.call( ['ib-engman.py', '--manager-create-engine'] )
-
         if self._args.execute and self._args.shutdown :
-            subprocess.call( ['ib-engman.py', '--manager-shutdown'] )
-
-        if self._args.execute and self._args.destroy :
-            subprocess.call( ['ib-engman.py', '--manager-destroy', 'idle'] )
-            time.sleep(600.0)
+            subprocess.call( ['ib-engman.py', '--disable'] )
+            time.sleep(5.0)
+            subprocess.call( ['ib-engman.py', '--shutdown'] )
 
         if self._args.execute and self._args.exit :
-            subprocess.call( ['ib-engman.py', '--server-exit'] )
+            subprocess.call( ['ib-engman.py', '--exit'] )
 
     def Main( self ) :
         self.ParseArgs()
