@@ -213,31 +213,10 @@ class Main( object ) :
                 break
         else :
             self._parser.error( "No ATS binary found" )
-
         if self._args.read_last :
-            t = self._defs.get( 'LastFile' )
-            if t is not None :
-                fpath = self.ExpandStr(t)
-                try :
-                    self.ReadDefsFile( fpath )
-                except IbAtsException as e :
-                    print >>sys.stderr, "Failed to read last file", fpath, ":", e
+            self.ReadLastFile( )
         if self._args.require_core  and  'CoreFile' not in self._defs :
             self._parser.error( "No core file specified" )
-            
-
-    def ReadDefsFile( self, fpath ) :
-        try :
-            n = 0
-            f = open( fpath )
-            for n, line in enumerate(f) :
-                name, value = line.rstrip().split( '=', 1 )
-                self._defs[name.strip()] = value
-            f.close()
-        except IOError as e :
-            raise IbAtsException(e)
-        except ValueError :
-            raise IbAtsException("Failed to parse line %d" % (n) )
 
     def Expand( self, args ) :
         loops = 0
@@ -273,6 +252,12 @@ class Main( object ) :
         assert len(expanded) == 1
         return expanded[0]
 
+    def GetExpandStr( self, name ) :
+        v = self._defs.get( name )
+        if v is None :
+            return None
+        return self.ExpandStr( v )
+
     def ExpandItem( self, item ) :
         if item is None :
             return None
@@ -291,6 +276,43 @@ class Main( object ) :
                 cmd[n:n+1] = globbed
         return cmd
         
+            
+    def ReadDefsFile( self, fpath ) :
+        try :
+            n = 0
+            f = open( fpath )
+            for n, line in enumerate(f) :
+                name, value = line.rstrip().split( '=', 1 )
+                self._defs[name.strip()] = value
+            f.close()
+        except IOError as e :
+            raise IbAtsException(e)
+        except ValueError :
+            raise IbAtsException("Failed to parse line %d" % (n) )
+
+    def ReadLastFile( self ) :
+        fpath = self.GetExpandStr( 'LastFile' )
+        try :
+            self.ReadDefsFile( fpath )
+        except IbAtsException as e :
+            print >>sys.stderr, "Failed to read last file", fpath, ":", e
+
+    def WriteLastFile( self, tool_out ) :
+        fpath = self.GetExpandStr( 'LastFile' )
+        try :
+            f = open( fpath, 'w' )
+            print >>f, "LastPid="+self.ExpandStr( '${PID}' )
+            print >>f, "LastRun="+self.ExpandStr( '${Run}' )
+            if tool_out is not None :
+                cores = glob.glob(tool_out+".core*")
+                for core in cores :
+                    print >>f, "CoreFile="+core
+            print >>f, "LastTool="+self._tool.ToolName
+            if tool_out is not None :
+                print >>f, "LastToolOut="+tool_out
+            f.close()
+        except IOError as e :
+            print "Failed to write to last file", fpath, ":", e
 
     def RunPre( self ) :
         if not self._args.precmds :
@@ -356,23 +378,8 @@ class Main( object ) :
         tool_out = None if self._tool.ToolOut is None else self.ExpandStr(self._tool.ToolOut)
         if tool_out is not None :
             print self._tool.ToolName, "output is in", tool_out
-
-        if not self._args.read_last :
-            return
-        try :
-            f = open( '.ib-ats.last', 'w' )
-            print >>f, "LastPid=", self.ExpandStr( '${PID}' )
-            print >>f, "LastRun=", self.ExpandStr( '${Run}' )
-            if tool_out is not None :
-                cores = glob.glob(tool_out+".core*")
-                for core in cores :
-                    print >>f, "CoreFile="+core
-            print f, "LastTool="+self._tool.ToolName
-            if tool_out is not None :
-                print f, "LastToolOut="+tool_out
-            f.close()
-        except IOError as e :
-            print "Failed to write to last file:", e
+        if self._args.write_last :
+            self.WriteLastFile( tool_out )
 
     def PrintTable( self ) :
         for name, value in self._defs.items( ) :

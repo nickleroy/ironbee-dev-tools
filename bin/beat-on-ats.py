@@ -85,6 +85,7 @@ class _Main( object ) :
                                    action="store", dest="new_config", default=None,
                                    help="Update the configuration file path" )
 
+        # Engine creation options 
         class CreateAction(argparse.Action):
             def __call__(self, parser, namespace, values, option_string=None):
                 try :
@@ -100,9 +101,6 @@ class _Main( object ) :
                                    action="store", dest="create", default=0.0, nargs=1,
                                    help="Set probability to create new IronBee engine [yes, no, (0.0 - 1.0)]" )
 
-        self._parser.add_argument( "--create-never",
-                                   action="store_const", dest="create", const=0.0,
-                                   help="Set probability to create new IronBee engine" )
         self._parser.add_argument( "--shutdown",
                                    action="store_true", dest="shutdown", default=False,
                                    help="When done: cause server to shut down engine manager" )
@@ -279,16 +277,19 @@ class _Main( object ) :
                 print >>sys.stderr, "Sleep failed:", e
                 break
 
-    def MainLoop( self ) :
+    def Setup( self ) :
         curl = [ "/usr/bin/curl" ]
         if self._args.rate_limit is not None :
             curl += ['--limit-rate', self._args.rate_limit ]
         if self._args.verbose < 2 :
             curl += ['-s']
+        self._curl = curl
 
+        self._start_time = time.time()
         self._nc_running = False
         self._extra_delay = 0.0
         self._killsig = signal.SIGTERM
+
         signal.signal(signal.SIGCHLD, self.Reaper)
         signal.signal(signal.SIGALRM, self.Shutdown)
         signal.signal(signal.SIGTERM, self.Shutdown)
@@ -303,30 +304,36 @@ class _Main( object ) :
             print "Forking curl with %s urls '%s' %d times, PID=%d" % \
                 (s, self._args.url, self._args.num_procs, os.getpid())
 
+    def BuildCurlCmd( self ) :
+        cmd = list(self._curl)
+        if self._args.trace :
+            cmd +=  [ '--trace-ascii',
+                      os.path.join(self._args.trace_dir,'ats-trace.%05d'%proc) ]
+        if self._args.out_null :
+            cmd +=  [ '-o', '/dev/null' ]
+        elif self._args.out_files :
+            cmd +=  [ '-o', os.path.join(self._args.out_dir,'ats-out.%05d'%proc) ]
+        if self._args.proxy is not None :
+            cmd +=  [ '--proxy', self._args.proxy ]
+        if len(self._args.random_urls) == 2 :
+            urls = random.randint(self._args.random_urls[0], self._args.random_urls[1])
+        else :
+            urls = self._args.urls
+        cmd += [ self._args.url for n in range(urls) ]
+        return cmd
+
+
+    def MainLoop( self ) :
         dev_null = open("/dev/null", "w")
         for proc in range(self._args.num_procs) :
             if self._shutdown :
                 return
-            cmd = list(curl)
-            if self._args.trace :
-                cmd +=  [ '--trace-ascii',
-                          os.path.join(self._args.trace_dir,'ats-trace.%05d'%proc) ]
-            if self._args.out_null :
-                cmd +=  [ '-o', '/dev/null' ]
-            elif self._args.out_files :
-                cmd +=  [ '-o', os.path.join(self._args.out_dir,'ats-out.%05d'%proc) ]
-            if self._args.proxy is not None :
-                cmd +=  [ '--proxy', self._args.proxy ]
-            if len(self._args.random_urls) == 2 :
-                urls = random.randint(self._args.random_urls[0], self._args.random_urls[1])
-            else :
-                urls = self._args.urls
-            cmd += [ self._args.url for n in range(urls) ]
-
-            started = False
-            while started == False :
+            cmd = self.BuildCurlCmd( )
+            while True :
                 if self._max_procs is None  or  len(self._children) < self._max_procs :
                     started = self.StartCmd( cmd, label="#%d"%proc, out=dev_null )
+                    if started :
+                        break
                 self.Delay( started )
 
             if self._shutdown :
@@ -359,6 +366,7 @@ class _Main( object ) :
     def Main( self ) :
         self.ParseArgs()
         if self._args.num_procs :
+            self.Setup()
             self.MainLoop()
             self.Wait()
         self.Final()
