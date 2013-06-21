@@ -137,6 +137,9 @@ class _Main( object ) :
         self._parser.add_argument( "--server-port", "-p",
                                    action="store", dest="port", type=int, default=8180,
                                    help="Specify server port" )
+        self._parser.add_argument( "--timeout", "-t",
+                                   action="store", dest="timeout", type=float, default=5,
+                                   help="Specify timeout" )
 
         self._parser.add_argument( "--execute",
                                    action="store_true", dest="execute", default=True,
@@ -157,14 +160,12 @@ class _Main( object ) :
             self._parser.error( 'Currently only "ATS" server supported ("%s" specified)' %
                                 (self_args.server) )
 
-    def Shutdown( self, signum, frame ):
-        print "nc timed out: Giving up"
-        os.kill( os.getpid(), signal.SIGTERM )
-
     def RunNc( self ) :
-        cmd = ( "nc", "localhost", str(self._args.port) )
+        cmd = [ "nc" ]
+        if self._args.timeout is not None :
+            cmd += [ "-w", str(self._args.timeout) ]
+        cmd += [ "localhost", str(self._args.port) ]
         null = open("/dev/null", "r")
-        signal.alarm(30)
         subprocess.call( cmd, stdin=null )
 
     def SendCommand( self, command ) :
@@ -180,7 +181,6 @@ class _Main( object ) :
                 (self._args.command_file, e)
 
     def SendCommands( self ) :
-        signal.signal(signal.SIGALRM, self.Shutdown)
         command = self._args.command.Command(self._args.command_args)
         if self._args.execute :
             self.SendCommand( self._args.command.Command(self._args.command_args) )
