@@ -151,13 +151,19 @@ class Main( object ) :
         self._parser.add_argument( "--disable-precmds",
                                    action="store_false", dest="precmds", default=True,
                                    help="Disable running of pre-commands")
+
         self._parser.add_argument( "--read-last",
-                                   action="store", dest="read_last",
-                                   nargs=1, type=bool, default=True,
-                                   help="Enable/disable reading of the last file")
+                                   action="store_true", dest="read_last", default=True,
+                                   help="Enable reading of the last file")
+        self._parser.add_argument( "--no-read-last",
+                                   action="store_false", dest="read_last",
+                                   help="Disable reading of the last file")
         self._parser.add_argument( "--write-last",
-                                   action="store", dest="write_last", default=True,
-                                   help="Enable / Disable writing of last file")
+                                   action="store_true", dest="write_last", default=True,
+                                   help="Enable writing of last file")
+        self._parser.add_argument( "--no-write-last",
+                                   action="store_false", dest="write_last",
+                                   help="Disable writing of last file")
 
         self._parser.set_defaults( defs = {} )
         class StrAction(argparse.Action):
@@ -299,6 +305,9 @@ class Main( object ) :
 
     def WriteLastFile( self, tool_out ) :
         fpath = self.GetExpandStr( 'LastFile' )
+        if fpath is None :
+            return
+        print "Write last file", fpath
         try :
             f = open( fpath, 'w' )
             print >>f, "LastPid="+self.ExpandStr( '${PID}' )
