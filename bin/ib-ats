@@ -111,7 +111,7 @@ class Main( object ) :
                 namespace.write_last = False
                 namespace.require_core = True
                 if values[0] != '-' :
-                    namespace.defs.append( 'CoreFile', values[0] )
+                    namespace.defs['CoreFile'] = values[0]
         self._parser.add_argument( "--core",
                                    action=CoreAction, nargs=1,
                                    help="Specify core file or \"-\" for last" )
@@ -159,13 +159,13 @@ class Main( object ) :
                                    action="store", dest="write_last", default=True,
                                    help="Enable / Disable writing of last file")
 
-        self._parser.set_defaults( defs = [] )
+        self._parser.set_defaults( defs = {} )
         class StrAction(argparse.Action):
             def __call__(self, parser, namespace, values, option_string=None):
                 for s in values :
                     try :
                         name, value = s.split( '=', 1 )
-                        namespace.defs.append( (name.strip(), value) )
+                        namespace.defs[name.strip()] = value
                     except ValueError :
                         parser.error( "Invalid definition '"+s+"'" )
         self._parser.add_argument( "strings", metavar='n=v', type=str,
@@ -195,7 +195,7 @@ class Main( object ) :
 
     def Parse( self ) :
         self._args = self._parser.parse_args()
-        for name,value in self._args.defs :
+        for name,value in self._args.defs.items() :
             self._defs[name] = value
         self._tool = self._CmdPrefixes[self._args.tool]
         if self._tool.Args is not None :
@@ -222,7 +222,7 @@ class Main( object ) :
                     self.ReadDefsFile( fpath )
                 except IbAtsException as e :
                     print >>sys.stderr, "Failed to read last file", fpath, ":", e
-        if self._args.require_core  and  not self._defs.get( 'CoreFile', None ) is None :
+        if self._args.require_core  and  'CoreFile' not in self._defs :
             self._parser.error( "No core file specified" )
             
 
