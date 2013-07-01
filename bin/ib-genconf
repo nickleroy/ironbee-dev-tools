@@ -99,6 +99,20 @@ class Main( object ) :
                                    default=sys.stdout,
                                    help='output file')
 
+        self._parser.add_argument( "-",
+                                   action="store_true", dest="noop", default=False,
+                                   help='Do nothing')
+
+        class EnvAction(argparse.Action):
+            def __call__(self, parser, namespace, values, option_string=None):
+                for s in values :
+                    if type(s) != str :
+                        break
+                    namespace.env_vars.append( s )
+        self._parser.add_argument( "--env", "-e",
+                                   action=EnvAction, dest="env_vars", default=[], nargs='+',
+                                   help='Specify list of env. variables to import')
+
         self._parser.add_argument( "--force-header",
                                    action="store_true", dest="force_header", default=False,
                                    help="Force insertion of genconf header")
@@ -128,6 +142,10 @@ class Main( object ) :
 
     def Parse( self ) :
         self._args = self._parser.parse_args()
+        for name in self._args.env_vars :
+            if name not in os.environ :
+                self._parser.error( '"%s" not in environment!'%(name) )
+            self._defs.Set( name, os.environ[name] )
         for name,value in self._args.defs :
             self._defs.Set( name, value )
 
@@ -320,6 +338,8 @@ class Main( object ) :
         self._defs.Set("HostName", socket.gethostname(), over=False)
         self._defs.Set("Time", time.asctime(), over=False)
         self.ProcessFile( self._args.infile, baseid, True )
+        if not self._args.quiet :
+            print self._args.infile.name, "-->", self._args.outfile.name
         
     def Main( self ) :
         self.Setup( )
