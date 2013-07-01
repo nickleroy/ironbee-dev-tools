@@ -330,6 +330,8 @@ class _Main( object ) :
                 return
             cmd = self.BuildCurlCmd( )
             while True :
+                if shutdown :
+                    break
                 if self._max_procs is None  or  len(self._children) < self._max_procs :
                     started = self.StartCmd( cmd, label="#%d"%proc, out=dev_null )
                     if started :
