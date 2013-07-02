@@ -55,6 +55,7 @@ class _Tool( object ) :
     ToolName = property( lambda self : self._defs["ToolName"] )
     ToolOut  = property( lambda self : self._defs.get("ToolOut", None) )
     Verbose  = property( lambda self : self._verbose )
+
     def Prefix( self ) :
         return self._prefix
     def ToolArgs( self, args ) :
@@ -78,6 +79,13 @@ class _ToolGdb( _Tool ) :
                         prefix=self._gdb_prefix,
                         tool_args="--args" )
 
+class _ToolGdbCore( _Tool ) :
+    _gdb_prefix = ("${ToolName}",)
+    def __init__( self, name ) :
+        _Tool.__init__( self, name,
+                        prefix=self._gdb_prefix,
+                        defs = {'Args':'${CoreFile'} )
+
 class _ToolStrace( _Tool ) :
     _strace_prefix = ("${ToolName}",
                       "-o", "${ToolOut}")
@@ -99,6 +107,7 @@ class IbToolMain( object ) :
     _tools = {
         "none"     : _Tool( "none" ),
         "gdb"      : _ToolGdb( "gdb" ),
+        "gdb-core" : _ToolGdbCore( "gdb" ),
         "strace"   : _ToolStrace( "strace" ),
         "valgrind" : _ToolValgrind("valgrind", defs={"SubTool":"memcheck"}),
         "helgrind" : _ToolValgrind("helgrind", defs={"SubTool":"helgrind"}),
