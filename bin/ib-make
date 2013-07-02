@@ -1,27 +1,29 @@
 #! /usr/bin/env python
-###########################################################################
-##
-## Copyright(c) 2012 by Nick LeRoy, 310 Jones Ave, Fort Atkinson, WI
-##
-## This program is free software: you can redistribute it and/or modify
-## it under the terms of the GNU General Public License as published by
-## the Free Software Foundation, either version 3 of the License, or
-## (at your option) any later version.
-## 
-## This program is distributed in the hope that it will be useful,
-## but WITHOUT ANY WARRANTY; without even the implied warranty of
-## MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-## GNU General Public License for more details.
-## 
-## You should have received a copy of the GNU General Public License
-## along with this program.  If not, see <http://www.gnu.org/licenses/>.
-##
-###########################################################################
+# ****************************************************************************
+# Licensed to Qualys, Inc. (QUALYS) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# QUALYS licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ****************************************************************************
 import os
 import sys
-import subprocess
-import argparse
+import shutil
 import glob
+import math
+import time
+import argparse
+import subprocess
+import collections
 from functools import partial
 
 class Target( object ) :
@@ -80,17 +82,69 @@ class Targets( object ) :
         return self._byname[name]
 
     def FlagEnable( self, flag, enabled ) :
-        #print flag, enabled
+        name = flag.replace("target_", "")
         for target in self._targets :
-            #print "  ", target.Name, target.Flags
-            target.FlagEnable( flag, enabled )
+            target.FlagEnable( name, enabled )
 
     def Targets( self, fn=None ) :
         for target in self._targets :
             if fn is None  or  fn(target) :
                 yield target
         return
-                
+
+class BuildTimer( object ) :
+    def __init__( self, target, start ) :
+        self._target = target
+        self._started = None
+        self._finished = None
+        if start :
+            self.Start()
+    Started = property( lambda self : self._started )
+    Finished = property( lambda self : self._finished )
+    def Start( self ) :
+        self._started = time.time()
+    def Stop( self, _print ) :
+        self._finished = time.time()
+        if _print :
+            self.Print( )
+    def _FormatTime( self, seconds ) :
+        return time.strftime( "%H:%M:%S", time.localtime(seconds) )
+    def Print( self ) :
+        assert self._started is not None and self._finished is not None
+        print "%s: started at %s, finished at %s, elapsed %.1fs" % \
+            (self._target.Name,
+             self._FormatTime(self._started),
+             self._FormatTime(self._finished),
+             (self._finished - self._started))
+
+class BuildTimers( object ) :
+    def __init__( self, enable ) :
+        self._timers = []
+        self._enable = enable
+    def AddTarget( self, target, start ) :
+        if self._enable :
+            timer = BuildTimer( target, start )
+            self._timers.append( timer )
+            return timer
+        return None
+    def GetTimer( self, n ) :
+        assert n is not None
+        try :
+            return self._timers[n]
+        except IndexError :
+            return None
+    def StopTimer( self, n ) :
+        timer = self.GetTimer( n )
+        if timer is not None :
+            timer.Stop( False )
+    def PrintTimer( self, timer=None, n=None ) :
+        if timer is None :
+            timer = self.GetTimer( n )
+        if timer is not None :
+            timer.Print()
+    def PrintAll( self ) :
+        for timer in sorted( self._timers, key=lambda t : t.Finished ) :
+            self.PrintTimer( timer )
 
 class Main( object ) :
     @classmethod
@@ -99,8 +153,8 @@ class Main( object ) :
             return
         targets = Targets( (Target("clean", flags=("clean",), force_one=True,
                                    pre_fn=lambda self:self._Confirm("make clean") ),
-                            Target("libs", flags=("default",) ),
-                            Target("default", flags=("default",), targets=[ ]),
+                            Target("libs", targets=tuple(), directory="libs", flags=("default",) ),
+                            Target("all", flags=("default",), targets=[ ]),
                             Target("install", flags=("install","default"), force_one=True),
                             Target("check",  flags=("check","default") ),
                             Target("doxygen",  flags=("doxygen",), force_one=True),
@@ -115,61 +169,111 @@ class Main( object ) :
                                                 prog=os.path.basename(sys.argv[0]) )
 
         self._parser.add_argument( "--force-make", "-f",
-                                   action="store_true", dest="target_force", default=False,
+                                   action="store_true", dest="force", default=False,
                                    help="Force make / wipe")
         self._parser.add_argument( "--no-force",
-                                   action="store_false", dest="target_force",
+                                   action="store_false", dest="force",
                                    help="Don't force make / wipe" )
 
         self._parser.add_argument( "--clean",
-                                   action="store_true", dest="target_clean", default=False,
+                                   action="store_true", dest="clean", default=False,
                                    help="Build clean target" )
 
         self._parser.add_argument( "--wipe",
                                    action="store_true", dest="wipe", default=False,
-                                   help="Wipe directory & run confgen" )
+                                   help="Wipe directory & run confgen (implies --confgen)" )
+
+        self._parser.add_argument( "--confgen",
+                                   action="store_true", dest="confgen", default=False,
+                                   help="Run confgen before building" )
+
+        self._parser.add_argument( "--autogen",
+                                   action="store_true", dest="autogen", default=False,
+                                   help="Autogen before building (implies --confgen)" )
 
         self._parser.add_argument( "--check", "--test", "-t",
-                                   action="store_true", dest="target_check", default=False,
+                                   action="store_true", dest="check", default=False,
                                    help="Build check target" )
         self._parser.add_argument( "--no-check", "--no-test",
-                                   action="store_false", dest="target_check",
+                                   action="store_false", dest="check",
                                    help="Don't build check target" )
 
         self._parser.add_argument( "--install", "-i",
-                                   action="store_true", dest="target_install", default=True,
+                                   action="store_true", dest="install", default=True,
                                    help="Build install target" )
         self._parser.add_argument( "--no-install",
-                                   action="store_false", dest="target_install",
+                                   action="store_false", dest="install",
                                    help="Don't build install target" )
 
         self._parser.add_argument( "--rpm",
-                                   action="store_true", dest="target_rpm", default=False,
+                                   action="store_true", dest="rpm", default=False,
                                    help="Build rpm-package target" )
         self._parser.add_argument( "--no-rpm",
-                                   action="store_false", dest="target_rpm",
+                                   action="store_false", dest="rpm",
                                    help="Don't build rpm-package target" )
 
-        self._parser.set_defaults( target_doxygen=False, target_default=None )
+        self._parser.set_defaults( doxygen=False, default=None )
         class DoxygenAction(argparse.Action):
             def __call__(self, parser, namespace, values, option_string=None):
-                namespace.target_doxygen = True
-                if "only" in option_string :
-                    namespace.target_default = False
+                namespace.doxygen = True
+                if option_string in ( "--doxygen-only", "--docs-only", "-do" ) :
+                    namespace.default = False
+                    namespace.install = False
         self._parser.add_argument( "--doxygen", "--docs",
                                    action=DoxygenAction, nargs=0,
                                    help="Build doxygen target" )
-        self._parser.add_argument( "--doxygen-only", "--docs-only",
+        self._parser.add_argument( "--doxygen-only", "--docs-only", "--do",
                                    action=DoxygenAction, nargs=0,
                                    help="Build only doxygen target" )
 
         self._parser.add_argument( "--jobs", "-j",
                                    action="store", type=int, dest="jobs", default=0,
-                                   help="Force number of jobs to run" )
+                                   help="Force number of # jobs to run" )
+        self._parser.add_argument( "-1",
+                                   action="store_const", dest="jobs", const=1,
+                                   help="Force number of # jobs to run to 1 (-j 1)" )
+
+        class AggressionAction(argparse.Action):
+            def __call__(self, parser, namespace, values, option_string=None):
+                if values is not None :
+                    namespace.aggression = values
+                else :
+                    namespace.aggression = 1.0
+                if option_string in ("--nice-aggressive", "--na", "-na") :
+                    namespace.nice = 10
+        self._parser.set_defaults( aggression=-1.0 )
+        self._parser.add_argument( "--aggressive", "-a",
+                                   action=AggressionAction, type=float, nargs='?',
+                                   help="Set the number of make jobs aggressively [<aggression mult>]" )
+        self._parser.add_argument( "--nice-aggressive", "--na", "-na",
+                                   action=AggressionAction, type=float, nargs='?',
+                                   help="Like --aggressive, but with default niceness (10)" )
+
+        class NiceAction(argparse.Action):
+            def __call__(self, parser, namespace, values, option_string=None):
+                if values is not None :
+                    namespace.nice = values
+                else :
+                    namespace.nice = 10
+        self._parser.set_defaults( nice=0 )
+        self._parser.add_argument( "--nice",
+                                   action=NiceAction, type=int, nargs='?',
+                                   help="Run make under \"nice\" [<niceness>]" )
 
         self._parser.add_argument( "--execute",
                                    action="store_true", dest="execute", default=True,
                                    help="Enable execution <default>" )
+
+        self._parser.add_argument( "--confirm",
+                                   action="store_true", dest="confirm", default=False,
+                                   help="Confirm before doing anything <default=off>" )
+
+        self._parser.add_argument( "--timing", "-T",
+                                   action="store_true", dest="timing", default=True,
+                                   help="Print timing information <default=on>" )
+        self._parser.add_argument( "--no-timing",
+                                   action="store_false", dest="timing",
+                                   help="Disable timing information" )
 
         self._parser.add_argument( "-n", "--no-execute",
                                    action="store_false", dest="execute",
@@ -186,58 +290,121 @@ class Main( object ) :
         for line in open( "/proc/cpuinfo" ) :
             if line.startswith("processor") :
                 cpus += 1
-        return (cpus / 2) if cpus >= 2 else 1
+        aggression = 0.5 if self._args.aggression < 0.5 else self._args.aggression
+        return int(math.floor((cpus * aggression) + 0.5))
 
     def _ParseArgs( self ) :
         self._args = self._parser.parse_args()
         for key,value in vars(self._args).items() :
-            if key.startswith("target_") :
-                self._targets.FlagEnable( key[7:], value )
-        if (self._args.jobs == 0) :
+            self._targets.FlagEnable( key, value )
+        if self._args.wipe or self._args.autogen :
+            self._args.confgen = True
+        if self._args.jobs == 0 :
             self._args.jobs = self._CalcMaxJobs( )
 
-
-    def _RunCommand( self, cmd ) :
-        if not self._args.execute :
-            print "Not running:", cmd
-            return 0
+    def _RunCommand( self, cmd, cwd=None, execute=True, no_exec_flag=None ) :
+        fromdir = "" if cwd is None else "from "+cwd
+        if not self._args.execute  or  not execute :
+            if no_exec_flag is None:
+                print "Not running:", cmd
+                return 0
+            else :
+                cmd += [ no_exec_flag ]
 
         if not self._args.quiet :
             print "Running:", cmd
 
-        status = subprocess.call( cmd )
+        status = subprocess.call( cmd, cwd=cwd )
         return status
 
-    def _BuildTarget( self, target ) :
+    def _BuildTarget( self, target, execute=False ) :
         target.PreExec( self )
-        cmd = [ "/usr/bin/make" ]
+        cmd = [ ]
+        if self._args.nice :
+            cmd += [ "/usr/bin/nice", "-"+str(self._args.nice) ]
+        cmd += [ "/usr/bin/make" ]
         cmd += target.MakeArgs(self._args.jobs)
 
-        status = self._RunCommand( cmd )
+        status = self._RunCommand( cmd, execute=execute )
         if status != 0 :
             sys.exit( status )
 
-    def _BuildAll( self ) :
+    def _BuildAll( self, execute ) :
+        timers = BuildTimers( execute and self._args.timing )
+        timers.AddTarget( Target('BUILD'), True )
         for target in self._targets.Targets( lambda target:target.Enabled ) :
-            self._BuildTarget( target )
+            timers.AddTarget( target, True )
+            self._BuildTarget( target, execute=execute )
+            timers.StopTimer( -1 )
+        timers.StopTimer( 0 )
+        timers.PrintAll()
 
-    def _Confirm( self, what ) :
+    def _Confirm( self, what, prefix=None ) :
         if not self._args.force :
-            ans = raw_input( "Really %s? " % what )
+            if prefix :
+                ans = raw_input( "%s  Really %s? " % (prefix, what) )
+            else :
+                ans = raw_input( "Really %s? " % what )
             if not ans.startswith( ('y', 'Y') ) :
                 sys.exit( 1 )
 
-    def _Wipe( self ) :
-        self._Confirm("wipe")
-        self._RunCommand( ["rm", "-fr"] + glob.glob("*") )
-        self._RunCommand( ["confgen",] )
+    __wipe_checks = (
+        'configure.ac',
+        'Makefile.am',
+        'VERSION',
+        'INSTALL',
+    )
+    def _Wipe( self, execute ) :
+        globs = glob.glob('*')
+        if len(globs) == 0 :
+            return
+        if execute  and  self._args.execute :
+            self._Confirm("wipe")
+        for name in self.__wipe_checks :
+            exists = os.path.isfile(name)
+            link = os.path.islink(name)
+            if exists and not link :
+                self._Confirm("wipe", name+" exists.")
+        self._RunCommand( ["rm", "-fr"] + globs, execute=execute )
+
+    def _CopyTreeIgnore( dirpath, dirents ) :
+        out = []
+        for de in dirents :
+            if not de.startswith(".git") :
+                out.append(de)
+        return out
+
+    def _CopyTree( self ) :
+        globs = glob.glob('*')
+        if len(globs) != 0 :
+            self._Confirm("overwrite")
+        shutil.copytree( )
+
+    def _AutoGen( self, execute ) :
+        self._RunCommand( ["./autogen.sh",], cwd=os.environ["IB_ROOT"], execute=execute )
+
+    def _ConfGen( self, execute ) :
+        self._RunCommand( ["confgen"], execute=execute, no_exec_flag='--no-execute' )
+
+    def _Run( self, execute ) :
+        v = vars(self._args)
+        for name,fn in self._pre_cmds.items() :
+            if v[name] :
+                fn( execute )
+        self._BuildAll( execute )
 
     def Main( self ) :
+        self._pre_cmds = collections.OrderedDict(
+            ( ('wipe', self._Wipe),
+              ('autogen', self._AutoGen),
+              ('confgen', self._ConfGen), )
+        )
         self._ParserSetup( )
         self._ParseArgs( )
-        if self._args.wipe :
-            self._Wipe( )
-        self._BuildAll( )
+        if self._args.confirm :
+            self._Run( False )
+            self._Confirm("build")
+        self._Run( True )
 
 
 main = Main()
