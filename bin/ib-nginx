@@ -21,24 +21,23 @@ import sys
 from ibtool import *
 
 class Main( IbToolMain ) :
-    _ats_defs = {
-        "FullName"    : "Apache Traffic Server",
-        "Name"        : "ATS",
-        "AtsVer"      : os.environ["ATS_VERSION"],
-        "AtsDir"      : os.environ["ATS_ROOT"],
-        "AtsVar"      : "${AtsDir}/var",
-        "AtsLogDir"   : "${AtsVar}/log/trafficserver",
-        "LogDir"      : "${AtsLogDir}",
-        "AtsEtcIn"    : "${EtcIn}/trafficserver/working/${AtsVer}",
-        "AtsEtc"      : "${Etc}/trafficserver",
-        "Prog"        : "${AtsDir}/bin/traffic_server",
-        "Trace"       : 'http.*|dns.*|http_hdrs|sdk|ironbee|libloader',
-        "Args"        : [ '-K', '-T${Trace}' ],
-        }
+    _nginx_defs = {
+        "FullName"    : "Nginx",
+        "Name"        : "Nginx",
+        "NginxVer"    : os.environ["NGINX_VERSION"],
+        "NginxDir"    : os.environ["NGINX_ROOT"],
+        "NginxVar"    : "${NginxDir}/var",
+        "NginxLogDir" : "${NginxVar}/log/trafficserver",
+        "LogDir"      : "${NginxLogDir}",
+        "NginxEtcIn"  : "${EtcIn}/nginx",
+        "NginxEtc"    : "${Etc}/nginx",
+        "Prog"        : "${NginxDir}/bin/nginx",
+        "Args"        : [ '-c', '${NginxEtc}/nginx.conf' ],
+    }
 
     def __init__( self ) :
-        IbToolMain.__init__( self, self._ats_defs )
-        self.Defs["PreCmds"]["ATS"] = ["make", "-C", "${AtsEtcIn}", "${MakeArgs}"]
+        IbToolMain.__init__( self, self._nginx_defs )
+        self.Defs["PreCmds"]["NGINX"] = ["make", "-C", "${NginxEtcIn}", "${MakeArgs}"]
         self.Defs["PreCmds"]["Clean"] = [ "/bin/rm", "${LogFiles}" ]
 
 main = Main( )

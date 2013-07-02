@@ -88,13 +88,16 @@ class IbExpander( object ) :
         if s is None :
             return None
         expanded = self.ExpandList( [s] )
-        return str(expanded)
+        if len(expanded) == 1 :
+            return expanded[0]
+        else :
+            return str(expanded)
 
     def ExpandItem( self, item ) :
         if item is None :
             return None
         elif type(item) == str :
-           return self.ExpandStr( item )
+            return self.ExpandStr( item )
         else :
             return self.ExpandList( item )
 
@@ -102,7 +105,14 @@ class IbExpander( object ) :
         return self._defs.get(name, None)
 
     def Lookup( self, name ) :
-        return self._defs.get(name, None)
+        v = self._defs.get(name, None)
+        return self.ExpandItem( v )
+
+    def __setitem__(self, k, v):
+        self.Set(k, v)
+
+    def __getitem__(self, k):
+        return self.Lookup( k )
 
     def Set( self, name, value, over=True ) :
         if name not in self._defs  or  over :
@@ -131,7 +141,8 @@ class IbExpander( object ) :
 
     def Dump( self, expand ) :
         print self._defs
-        for name, value in self._defs.items( ) :
+        for name in sorted(self._defs.keys()) :
+            value = self._defs[name]
             if not expand :
                 print name, "=", value
                 continue

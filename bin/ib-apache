@@ -22,24 +22,24 @@ from ibtool import *
 
 class Main( IbToolMain ) :
     _httpd_defs = {
-        "HttpdVer"      : os.environ.get("HTTPD_VERSION", "2.4.3"),
-        "HttpdDir"      : os.environ.get("HTTPD_ROOT",
-                                         os.path.join(os.environ["EXT_INSTALL"],
-                                                      "httpd-${HttpdVer}")),
-
+        "FullName"      : "Apache HTTPd",
+        "Name"          : "HTTPd",
+        "HttpdVer"      : os.environ["HTTPD_VERSION"],
+        "HttpdDir"      : os.environ["HTTPD_ROOT"],
         "HttpdLog"      : "${Log}/httpd",
-        "HttpdLogFiles" : "${HttpdLog}/*",
+        "LogDir"        : "${HttpdLogDir}",
         "HttpdEtcIn"    : "${EtcIn}/httpd",
         "HttpdEtc"      : "${Etc}/httpd",
         "HttpdConf"     : "${Etc}/httpd/httpd.conf",
         "Prog"          : "${HttpdDir}/bin/httpd",
         "Args"          : [ "-d", "${HttpdEtc}", "-f" "${HttpdConf}", "-D", "FOREGROUND" ],
-        }
+    }
 
     def __init__( self ) :
-        IbToolMain.__init__( self, "Apache HTTPd", "Httpd", self._httpd_defs )
-        self.Defs.Append( "PreCmds", [["make", "-C", "${HttpdEtcIn}", "${MakeArgs}"]] )
-        self.GetTool( self, "gdb" ).AppendProgArgs( ("-X",) )
+        IbToolMain.__init__( self, self._httpd_defs )
+        self.Defs["PreCmds"]["HTTPd"] = ["make", "-C", "${HttpdEtcIn}", "${MakeArgs}"]
+        self.Defs["PreCmds"]["Clean"] = [ "/bin/rm", "${LogFiles}" ]
+        self.GetTool( "gdb" ).AppendProgArgs( ("-X",) )
 
 main = Main( )
 main.Main( )
