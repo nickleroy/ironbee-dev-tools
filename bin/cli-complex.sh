@@ -5,7 +5,7 @@ ETC=${QYLS_ETC}
 ETC_IB=${ETC}/ironbee
 DATA=${QYLS_DATA}
 VAR=${QYLS_VAR}
-TMP=${DEVEL}/tmp
+TMP=${QYLS_DEVEL}/tmp
 
 if test "$IBBUILD" = "" ; then
   IBBUILD="${BUILD}/gcc-std"
