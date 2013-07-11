@@ -27,7 +27,7 @@ class Main( IbToolMain ) :
         "NginxVer"    : os.environ["NGINX_VERSION"],
         "NginxDir"    : os.environ["NGINX_ROOT"],
         "NginxVar"    : "${NginxDir}/var",
-        "NginxLogDir" : "${NginxVar}/log/trafficserver",
+        "NginxLogDir" : "${NginxVar}/log/nginx",
         "LogDir"      : "${NginxLogDir}",
         "NginxEtcIn"  : "${EtcIn}/nginx",
         "NginxEtc"    : "${Etc}/nginx",
