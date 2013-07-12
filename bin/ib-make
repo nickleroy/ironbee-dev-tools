@@ -24,54 +24,181 @@ import time
 import argparse
 import subprocess
 import collections
+import pprint
 from functools import partial
 
-class Target( object ) :
-    def __init__( self, name, targets=None, force_one=False, pre_fn=None,
-                  flags=None, directory=None ) :
-        self._name = name
-        self._targets = ( name, ) if targets is None else targets
-        self._flags = ( ) if flags is None else flags
-        self._force_one = force_one
-        self._pre_fn = pre_fn
-        self._dir = directory
+class BaseTarget( object ) :
+    def __init__( self, name, phase=None, flags=None ) :
+        assert type(name) == str
+        assert type(phase) == int
         self._enabled = True
+        assert name != None
+        assert phase != None
+        self._name = name
+        self._phase = phase
+        self._flags = self._MakeTuple(flags)
+
+    @staticmethod
+    def _MakeList( args, alt=None ) :
+        if args is None  and  alt is None :
+            return [ ]
+        elif args is None :
+            args = alt
+        if type(args) in (list,tuple) :
+            return list(args)
+        else :
+            return [ args ]
+
+    @staticmethod
+    def _MakeTuple( args, alt=None ) :
+        if args is None  and  alt is None :
+            return ( )
+        elif args is None :
+            args = alt
+        if type(args) in (list,tuple) :
+            return tuple(args)
+        else :
+            return ( args, )
+
     def _SetEnabled( self, enabled ) :
         self._enabled = enabled
-    Name     = property( lambda self : self._name )
-    Enabled  = property( lambda self : self._enabled, _SetEnabled )
-    Targets  = property( lambda self : self._targets )
-    ForceOne = property( lambda self : self._force_one )
-    Dir      = property( lambda self : self._dir )
-    Flags    = property( lambda self : self._flags )
-
-    def SetPreExec( self, pre_fn ) :
-        self._pre_fn = pre_fn
-
-    def PreExec( self, p ) :
-        if self._pre_fn is not None :
-            self._pre_fn( p )
-
-    def MakeArgs( self, max_jobs ) :
-        args = [ "-j", str(self.NumJobs(max_jobs)) ]
-        if self._dir is not None :
-            args += [ "-C", self._dir ]
-        args += self._targets
-        return args
-
-    def NumJobs( self, max_jobs ) :
-        return 1 if self._force_one else max_jobs
 
     def FlagEnable( self, flag, enabled ) :
         if flag in self._flags  and  enabled is not None :
             self.Enabled = enabled
 
+    Name       = property( lambda self : self._name )
+    Phase      = property( lambda self : self._phase )
+    Enabled    = property( lambda self : self._enabled, _SetEnabled )
+    Flags      = property( lambda self : self._flags )
+
+
+class FuncTarget( BaseTarget ) :
+    def __init__( self, name, phase, flags, fn, *args, **kwargs) :
+        BaseTarget.__init__( self, name, phase, flags )
+        self._fn = fn
+        self._args = args
+        self._kwargs = kwargs
+
+    def Exec( self, *_args, **_kwargs ) :
+        args = list(self._args)
+        args += _args
+        kwargs = self._kwargs.copy()
+        kwargs.update(_kwargs)
+        return self._fn(*args, **kwargs)
+
+    def ExecPreFunc( self, *args, **kwargs ) :
+        return True
+
+    def __str__( self ) :
+        return 'Func Target "%s": Phase=%d Flags=%s fn=%s Enabled=%s' % \
+            ( self.Name, self.Phase, str(self.Flags),
+              str(self._fn), str(self.Enabled) )
+
+
+class ExecTarget( BaseTarget ) :
+    def __init__( self, name, phase, flags, pre_fn=None, argv=None, cwd=None ) :
+        BaseTarget.__init__( self, name, phase, flags )
+        self._argv = self._MakeList(argv)
+        self._cwd = cwd
+        self._pre_fn = pre_fn
+
+    def _GetExec( self ) :
+        return self._argv[0] if len(self._argv) else None
+
+    def _SetExec( self, executable ) :
+        if len(self._argv) :
+            self._argv[0] = executable
+        else :
+            self._argv = [ executable ]
+
+    def _SetArgv( self, argv ) :
+        self._argv = []
+        self._AddArgs( argv )
+
+    def AddArgs( self, args ) :
+        self._argv += self._MakeList(args)
+
+    def GetCommand( self, nice=None, prefix=None, args=None ) :
+        command = []
+        if nice is not None  and  nice != 0 :
+            command += [ "/usr/bin/nice", "-"+str(nice) ]
+        if prefix is not None :
+            command += self._MakeList( prefix )
+        command += self._argv
+        command += self._MakeList( args )
+        return command
+
+    def _SetCwd( self, cwd ) :
+        self._cwd = cwd
+
+    def _SetPreFunc( self, pre_fn ) :
+        self._pre_fn = pre_fn
+
+    def ExecPreFunc( self, *args, **kwargs ) :
+        if self._pre_fn is None :
+            return (True, [])
+        return self._pre_fn( *args, **kwargs )
+
+    Argv       = property( lambda self : self._argv, _SetArgv )
+    Command    = property( lambda self : self.GetCommand() )
+    Executable = property( _GetExec, _SetExec )
+    Cwd        = property( lambda self : self._cwd, _SetCwd )
+    PreFunc    = property( lambda self : self._pre_fn, _SetPreFunc )
+
+    def __str__( self ) :
+        return 'Exec Target "%s": Phase=%d Flags=%s Dir=%s PreFunc=%s Enabled=%s' % \
+            ( self.Name, self.Phase, str(self.Flags),
+              self.Cwd, str(self.PreFunc), str(self.Enabled) )
+
+
+class MakeTarget( ExecTarget ) :
+    def __init__( self, name, phase, flags, pre_fn=None, targets=None, force_one=False,
+                  directory=None ) :
+        ExecTarget.__init__( self, name, phase, flags, pre_fn, "/usr/bin/make" )
+        self._dir = directory
+        self._targets = self._MakeTuple(targets, name)
+        self._force_one = force_one
+
+    def GetMakeCommand( self, execute, max_jobs, nice=None, prefix=None ) :
+        args = [ ]
+        if not execute :
+            args += [ "-n" ]
+        args += [ "-j", str(self.NumJobs(max_jobs)) ]
+        if self._dir is not None :
+            args += [ "-C", self._dir ]
+        args += self.Targets
+        return self.GetCommand( nice, prefix, args )
+
+    def NumJobs( self, max_jobs ) :
+        return 1 if self._force_one else max_jobs
+
+    Dir        = property( lambda self : self._dir )
+    Name       = property( lambda self : self._name )
+    Targets    = property( lambda self : self._targets )
+    ForceOne   = property( lambda self : self._force_one )
+
+    def Copy( self, name, targets=None, phase=None, pre_fn=None, flags=None, directory=None ) :
+        assert name != self.Name
+        if targets   is None : targets = self.Targets
+        if phase     is None : phase = self.Phase
+        if pre_fn    is None : pre_fn = self.PreFunc
+        if flags     is None : flags = self.Flags
+        if directory is None : directory = self.Dir
+        return MakeTarget(name, phase, flags, pre_fn, targets, self.ForceOne, directory)
+
+    def __str__( self ) :
+        return 'Make Target "%s": Phase=%d Flags=%s Targets=%s One=%s Dir=%s PreFunc=%s Enabled=%s' % \
+            ( self.Name, self.Phase, str(self.Flags), str(self.Targets), str(self.ForceOne),
+              self.Dir, str(self.PreFunc), str(self.Enabled) )
+
 
 class Targets( object ) :
     def __init__( self, targets ) :
-        self._targets = targets
+        self._targets = list(targets)
         self._byname = { }
         for t in targets :
+            assert isinstance(t, BaseTarget)
             self._byname[t.Name] = t
 
     def AddTarget( self, target ) :
@@ -87,10 +214,15 @@ class Targets( object ) :
             target.FlagEnable( name, enabled )
 
     def Targets( self, fn=None ) :
-        for target in self._targets :
+        for target in sorted(self._targets, key=lambda tgt: tgt.Phase) :
             if fn is None  or  fn(target) :
                 yield target
         return
+    def __str__( self ) :
+        s = "Targets (%d):\n" % len(self._byname)
+        for target in sorted(self._targets, key=lambda tgt: tgt.Phase) :
+            s += "  "+str(target)+"\n"
+        return s
 
 class BuildTimer( object ) :
     def __init__( self, target, start ) :
@@ -151,16 +283,28 @@ class Main( object ) :
     def InitMain( cls ) :
         if "_targets" in dir(cls) :
             return
-        targets = Targets( (Target("clean", flags=("clean",), force_one=True,
-                                   pre_fn=lambda self:self._Confirm("make clean") ),
-                            Target("libs", targets=tuple(), directory="libs", flags=("default",) ),
-                            Target("all", flags=("default",), targets=[ ]),
-                            Target("install", flags=("install","default"), force_one=True),
-                            Target("check",  flags=("check","default") ),
-                            Target("doxygen",  flags=("doxygen",), force_one=True),
-                            Target("rpm", targets=("rpm-package",), flags=("rpm",) ),) )
+        targets = Targets(
+            (
+                ExecTarget('autogen', phase=0, flags="autogen",
+                           argv=["./autogen.sh"], cwd=os.environ["IB_ROOT"],
+                           pre_fn=lambda self:self._Confirm("run autogen") ),
+                ExecTarget("wipe",    phase=0, flags="wipe",
+                           argv=["rm", "-fr"], pre_fn=Main._PreWipe ),
+                MakeTarget("clean",   phase=0, flags=("clean","clean_root"), force_one=True,
+                           pre_fn=lambda self:self._Confirm("make clean") ),
+                ExecTarget('confgen', phase=1, flags="confgen", argv=["confgen","-i"],
+                           pre_fn=lambda self:self._Confirm("run confgen") ),
+                MakeTarget("libs",    phase=2, targets=[],
+                           directory="libs", flags="default" ),
+                MakeTarget("all",     phase=3, flags="default", targets=[] ),
+                MakeTarget("install", phase=4, flags=("install","default"), force_one=True),
+                MakeTarget("check",   phase=5, flags=("check","default") ),
+                MakeTarget("doxygen", phase=6, flags="doxygen", force_one=True),
+                MakeTarget("rpm",     phase=6, flags="rpm", targets="rpm-package" ),
+            )
+        )
         cls._targets = targets
-        
+
     def __init__( self ) :
         Main.InitMain()
 
@@ -174,14 +318,28 @@ class Main( object ) :
         self._parser.add_argument( "--no-force",
                                    action="store_false", dest="force",
                                    help="Don't force make / wipe" )
+        self._parser.add_argument( "--yes", "-y",
+                                   action="store_true", dest="defaultyn", default=False,
+                                   help="Set default confirm answer to \"yes\"" )
+        self._parser.add_argument( "--no",
+                                   action="store_false", dest="defaultyn",
+                                   help="Set default confirm answer to \"no\"" )
 
-        self._parser.add_argument( "--clean",
-                                   action="store_true", dest="clean", default=False,
-                                   help="Build clean target" )
+        cgroup = self._parser.add_mutually_exclusive_group( )
+        self._parser.set_defaults( clean=False, clean_root=False, clean_dirs=set() )
+        class CleanAction(argparse.Action):
+            def __call__(self, parser, namespace, values, option_string=None):
+                namespace.clean = True
+                for s in values :
+                    namespace.clean_dirs.add(s)
 
-        self._parser.add_argument( "--wipe",
-                                   action="store_true", dest="wipe", default=False,
-                                   help="Wipe directory & run confgen (implies --confgen)" )
+        cgroup.add_argument( "--clean", "-c",
+                             action=CleanAction, nargs='*',
+                             choices=('engine', 'libs', 'modules', 'util', 'servers'),
+                             help="'make clean' [dir [dir..]]")
+        cgroup.add_argument( "--wipe",
+                             action="store_true", dest="wipe", default=False,
+                             help="Wipe directory & run confgen (implies --confgen)" )
 
         self._parser.add_argument( "--confgen",
                                    action="store_true", dest="confgen", default=False,
@@ -227,10 +385,10 @@ class Main( object ) :
                                    help="Build only doxygen target" )
 
         self._parser.add_argument( "--jobs", "-j",
-                                   action="store", type=int, dest="jobs", default=0,
+                                   action="store", type=int, dest="max_jobs", default=0,
                                    help="Force number of # jobs to run" )
         self._parser.add_argument( "-1",
-                                   action="store_const", dest="jobs", const=1,
+                                   action="store_const", dest="max_jobs", const=1,
                                    help="Force number of # jobs to run to 1 (-j 1)" )
 
         class AggressionAction(argparse.Action):
@@ -285,6 +443,9 @@ class Main( object ) :
                                    action="store_true", dest="quiet", default=False,
                                    help="be vewwy quiet (I'm hunting wabbits)" )
 
+    def _Target( self, name ) :
+        return self._targets.Target( name )
+
     def _CalcMaxJobs( self ) :
         cpus = 0
         for line in open( "/proc/cpuinfo" ) :
@@ -295,22 +456,36 @@ class Main( object ) :
 
     def _ParseArgs( self ) :
         self._args = self._parser.parse_args()
-        for key,value in vars(self._args).items() :
+        args = vars(self._args)
+
+        self._args.clean_root = self._args.clean and (len(self._args.clean_dirs) == 0)
+        for d in self._args.clean_dirs :
+            clean = self._Target( 'clean' )
+            flag = "clean_"+d
+            target = clean.Copy( "clean-"+d, flags=("clean",flag), directory=d,
+                                 pre_fn=lambda self:self._Confirm("make clean in "+d) )
+            self._targets.AddTarget( target )
+            args[flag] = True
+        if self._args.verbose >= 2 :
+            pp = pprint.PrettyPrinter( )
+            pp.pprint( args )
+
+        for key,value in args.items() :
             self._targets.FlagEnable( key, value )
         if self._args.wipe or self._args.autogen :
             self._args.confgen = True
-        if self._args.jobs == 0 :
-            self._args.jobs = self._CalcMaxJobs( )
+        if self._args.max_jobs == 0 :
+            self._args.max_jobs = self._CalcMaxJobs( )
 
-    def _RunCommand( self, cmd, cwd=None, execute=True, no_exec_flag=None ) :
+        if self._args.verbose >= 2 :
+            print str(self._targets)
+
+
+    def _RunCommand( self, cmd, cwd=None, execute=True ) :
         fromdir = "" if cwd is None else "from "+cwd
         if not self._args.execute  or  not execute :
-            if no_exec_flag is None:
-                print "Not running:", cmd
-                return 0
-            else :
-                cmd += [ no_exec_flag ]
-
+            print "Not running:", cmd
+            return 0
         if not self._args.quiet :
             print "Running:", cmd
 
@@ -318,20 +493,26 @@ class Main( object ) :
         return status
 
     def _BuildTarget( self, target, execute=False ) :
-        target.PreExec( self )
-        cmd = [ ]
-        if self._args.nice :
-            cmd += [ "/usr/bin/nice", "-"+str(self._args.nice) ]
-        cmd += [ "/usr/bin/make" ]
-        cmd += target.MakeArgs(self._args.jobs)
-
-        status = self._RunCommand( cmd, execute=execute )
+        (run, args) = target.ExecPreFunc( self )
+        if not run :
+            execute=False
+        if type(target) == FuncTarget :
+            status = target.Exec( self, execute )
+            cmd = None
+        elif type(target) == MakeTarget :
+            cmd = target.GetMakeCommand( execute, self._args.max_jobs, self._args.nice )
+            execute = True
+        else :
+            cmd = target.GetCommand( self._args.nice, args=args )
+        print cmd, execute
+        if cmd is not None :
+            status = self._RunCommand( cmd, execute=execute )
         if status != 0 :
             sys.exit( status )
 
     def _BuildAll( self, execute ) :
         timers = BuildTimers( execute and self._args.timing )
-        timers.AddTarget( Target('BUILD'), True )
+        timers.AddTarget( BaseTarget('BUILD', 0), True )
         for target in self._targets.Targets( lambda target:target.Enabled ) :
             timers.AddTarget( target, True )
             self._BuildTarget( target, execute=execute )
@@ -340,13 +521,21 @@ class Main( object ) :
         timers.PrintAll()
 
     def _Confirm( self, what, prefix=None ) :
-        if not self._args.force :
-            if prefix :
-                ans = raw_input( "%s  Really %s? " % (prefix, what) )
-            else :
-                ans = raw_input( "Really %s? " % what )
-            if not ans.startswith( ('y', 'Y') ) :
-                sys.exit( 1 )
+        if self._args.force :
+            return (True, [])
+        default = "Y" if self._args.defaultyn else "N"
+        if prefix :
+            ans = raw_input( "%s  Really %s (yes/no/skip) [%s]? " % (prefix, what, default) )
+        else :
+            ans = raw_input( "Really %s (yes/no/skip) [%s]? " % (what, default) )
+        yes  = ans.startswith( ('y', 'Y') )
+        no   = ans.startswith( ('n', 'N') )
+        skip = ans.startswith( ('s', 'S') )
+        if self._args.defaultyn and no :
+            sys.exit( 1 )
+        elif not self._args.defaultyn and not (yes or skip) :
+            sys.exit( 1 )
+        return (not skip, [])
 
     __wipe_checks = (
         'configure.ac',
@@ -354,18 +543,21 @@ class Main( object ) :
         'VERSION',
         'INSTALL',
     )
-    def _Wipe( self, execute ) :
+    def _PreWipe( self ) :
         globs = glob.glob('*')
         if len(globs) == 0 :
-            return
-        if execute  and  self._args.execute :
-            self._Confirm("wipe")
+            return (False, [])
+        (run, args) = self._Confirm("wipe")
+        if not run :
+            return (False, [])
         for name in self.__wipe_checks :
             exists = os.path.isfile(name)
             link = os.path.islink(name)
             if exists and not link :
-                self._Confirm("wipe", name+" exists.")
-        self._RunCommand( ["rm", "-fr"] + globs, execute=execute )
+                (run, args) = self._Confirm("wipe", name+" exists.")
+                if not run :
+                    return (False, [])
+        return (True, globs )
 
     def _CopyTreeIgnore( dirpath, dirents ) :
         out = []
@@ -377,34 +569,18 @@ class Main( object ) :
     def _CopyTree( self ) :
         globs = glob.glob('*')
         if len(globs) != 0 :
-            self._Confirm("overwrite")
+            run, args = self._Confirm("overwrite")
+            if not run :
+                return
         shutil.copytree( )
 
-    def _AutoGen( self, execute ) :
-        self._RunCommand( ["./autogen.sh",], cwd=os.environ["IB_ROOT"], execute=execute )
-
-    def _ConfGen( self, execute ) :
-        self._RunCommand( ["confgen"], execute=execute, no_exec_flag='--no-execute' )
-
-    def _Run( self, execute ) :
-        v = vars(self._args)
-        for name,fn in self._pre_cmds.items() :
-            if v[name] :
-                fn( execute )
-        self._BuildAll( execute )
-
     def Main( self ) :
-        self._pre_cmds = collections.OrderedDict(
-            ( ('wipe', self._Wipe),
-              ('autogen', self._AutoGen),
-              ('confgen', self._ConfGen), )
-        )
         self._ParserSetup( )
         self._ParseArgs( )
         if self._args.confirm :
             self._Run( False )
             self._Confirm("build")
-        self._Run( True )
+        self._BuildAll( True )
 
 
 main = Main()
