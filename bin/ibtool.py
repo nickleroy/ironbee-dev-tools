@@ -402,7 +402,7 @@ class IbToolMain( object ) :
             status = 0
         if status :
             print "Exit status is", status
-        tool_out = None if self._tool.ToolOut is None else self.ExpandStr(self._tool.ToolOut)
+        tool_out = None if self._tool.ToolOut is None else self._defs.ExpandStr(self._tool.ToolOut)
         if tool_out is not None :
             print self._tool.ToolName, "output is in", tool_out
         if self._args.write_last :
