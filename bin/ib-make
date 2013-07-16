@@ -312,6 +312,11 @@ class Main( object ) :
         self._parser = argparse.ArgumentParser( description="Build IronBee",
                                                 prog=os.path.basename(sys.argv[0]) )
 
+
+        self._parser.add_argument( "--dir", "-C",
+                                   action="store", dest="directory", default=None,
+                                   help="Specify build directory")
+
         self._parser.add_argument( "--force-make", "-f",
                                    action="store_true", dest="force", default=False,
                                    help="Force make / wipe")
@@ -457,6 +462,14 @@ class Main( object ) :
     def _ParseArgs( self ) :
         self._args = self._parser.parse_args()
         args = vars(self._args)
+
+        d = args['directory']
+        if d is not None :
+            try :
+                os.chdir(d)
+            except OSError as e :
+                print >> sys.stderr, "Failed to chdir to "+d+":", e
+                sys.exit(1)
 
         self._args.clean_root = self._args.clean and (len(self._args.clean_dirs) == 0)
         for d in self._args.clean_dirs :
