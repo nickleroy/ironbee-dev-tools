@@ -35,7 +35,7 @@ class Main( object ) :
         self._stack = [ ]
 
     def Setup( self ) :
-        self._parser = argparse.ArgumentParser( description="Configuration Generator",
+        self._parser = argparse.ArgumentParser( description="IronBee Configuration Generator",
                                                 prog="ib-genconf" )
 
         self._parser.set_defaults( patterns = collections.OrderedDict() )
