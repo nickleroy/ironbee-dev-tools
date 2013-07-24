@@ -126,8 +126,8 @@ class IbExpander( object ) :
     def Append( self, name, value ) :
         t = type(self._defs.get(name, None))
         if t is list :
-            if type(value) is list :
-                self._defs[name] += value
+            if type(value) in (list, tuple) :
+                self._defs[name] += list(value)
             else :
                 self._defs[name].append(value)
         elif t is dict :
