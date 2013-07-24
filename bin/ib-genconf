@@ -315,7 +315,7 @@ class Main( object ) :
         self._defs.Set("Time", time.asctime(), over=False)
         self.ProcessFile( self._args.infile, baseid, True )
         if not self._args.quiet :
-            print self._args.infile.name, "-->", self._args.outfile.name
+            print "Generating", self._args.outfile.name, "from", self._args.infile.name
         
     def Main( self ) :
         self.Setup( )
