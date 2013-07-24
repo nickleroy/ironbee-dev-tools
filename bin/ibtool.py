@@ -325,6 +325,8 @@ class IbToolMain( object ) :
 
         if self._args.clean :
             self._defs["PreCmds"]["Clean"] = [ "/bin/rm", "${LogFiles}" ]
+        if self._args.verbose :
+            self._defs.Append("MakeArgs", "DUMP=dump")
         if self._args.force_make :
             self._defs.Append("MakeArgs", "-B")
         if self._args.log_level is not None :
