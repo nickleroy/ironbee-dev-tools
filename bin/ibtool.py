@@ -136,6 +136,8 @@ class IbToolMain( object ) :
         "IbRnsEtc"      : "${EtcIn}/rns-ironbee",
         "PreCmds"       : { "IB"  : ["make", "-C", "${IbEtc}", "${MakeArgs}"], },
         "LastFile"      : '.ib-${NameLower}.last',
+        "LuaDir"        : os.path.join(os.environ["IB_LIBDIR"], "lua"),
+        "LuaPath"       : ";".join([s+"/?.lua" for s in "${LuaDir}", "${Etc}/ironbee"]),
     }
 
     def __init__( self, defs ) :
@@ -438,10 +440,6 @@ class IbToolMain( object ) :
         if len(cmd) == 0 :
             return
 
-        if not self._args.execute :
-            print "Not running:", cmd
-            return
-
         outfile = self._defs.Lookup("Output")
 
         lpath = os.environ.get("LD_LIBRARY_PATH")
@@ -451,7 +449,21 @@ class IbToolMain( object ) :
         else :
             lpath += ":"+libdir
         os.environ['LD_LIBRARY_PATH'] = lpath
-        print lpath
+        if self._args.verbose :
+            print "LD_LIBRARY_PATH set to", lpath
+
+        luapath = os.environ.get('LUA_PATH')
+        if luapath is None :
+            luapath = self._defs.Lookup( "LuaPath" )
+        else :
+            luapath += ";"+self._defs.Lookup( "LuaPath" )
+        os.environ['LUA_PATH'] = luapath
+        if self._args.verbose :
+            print "LUA_PATH set to", luapath
+
+        if not self._args.execute :
+            print "Not running:", cmd
+            return
 
         if not self._args.quiet :
             print "Running:", cmd
