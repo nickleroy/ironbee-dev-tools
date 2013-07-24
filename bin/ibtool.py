@@ -243,6 +243,13 @@ class IbToolMain( object ) :
                                    help='Specify IronBee rule debug level')
 
         self._parser.set_defaults( targets=("default",) )
+        self._parser.add_argument( "--fresh",
+                                   action="store_const", dest="targets", const=("fresh",),
+                                   help="make fresh in etc directories")
+        self._parser.add_argument( "--targets",
+                                   action="store", dest="targets", nargs="+",
+                                   help="make fresh in etc directories")
+
         self._parser.add_argument( "--out", "-o",
                                    dest="output", type=argparse.FileType('w'), default=None,
                                    help='Specify output file')
