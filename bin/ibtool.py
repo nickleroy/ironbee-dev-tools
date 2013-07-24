@@ -133,6 +133,7 @@ class IbToolMain( object ) :
         "Cmd"           : [ "${Executable}", "${Args}" ],
         "IbLibDir"      : os.environ["IB_LIBDIR"],
         "IbEtc"         : "${EtcIn}/ironbee",
+        "IbRnsEtc"      : "${EtcIn}/rns-ironbee",
         "PreCmds"       : { "IB"  : ["make", "-C", "${IbEtc}", "${MakeArgs}"], },
         "LastFile"      : '.ib-${NameLower}.last',
     }
@@ -187,6 +188,19 @@ class IbToolMain( object ) :
         self._parser.add_argument( "--force-make", "-f",
                                    action="store_true", dest="force_make", default=False,
                                    help="Force execution of make in etc directories")
+
+        class IbAction(argparse.Action):
+            def __call__(self, parser, namespace, values, option_string=None):
+                if len(values) == 0 :
+                    namespace.defs["IbEtc"] = parser._main.Defs.Lookup("IbRnsEtc")
+                else :
+                    namespace.defs["IbEtc"] = values[0]
+        self._parser.add_argument( "--rns",
+                                   action=IbAction, nargs=0,
+                                   help="Use the RNS IronBee etc")
+        self._parser.add_argument( "--ib",
+                                   action="store", dest="ironbee", nargs=1,
+                                   help="Specify ironbee etc source directory" )
 
         def LogLevels( levels ) :
             count = len(levels)
