@@ -188,31 +188,44 @@ class IbToolMain( object ) :
                                    action="store_true", dest="force_make", default=False,
                                    help="Force execution of make in etc directories")
 
-        log_levels = ("EMERGENCY",
-                      "ALERT",
-                      "CRITICAL",
-                      "ERROR",
-                      "WARNING",
-                      "NOTICE",
-                      "INFO",
-                      "DEBUG",
-                      "DEBUG2",
-                      "DEBUG3",
-                      "TRACE")
-        log_level_lower = tuple([ l.lower() for l in log_levels ])
-        log_level_cap = tuple([ l.capitalize() for l in log_levels ])
-        all_levels = log_levels + log_level_lower + log_level_cap
-        self._parser.add_argument( "--log-level", "-l",
+        def LogLevels( levels ) :
+            count = len(levels)
+            lower = [ l.lower() for l in log_levels ]
+            nums  = [ str(n) for n in range(count) ]
+            return tuple(lower + nums)
+
+        log_levels = (
+            "emergency",
+            "alert",
+            "critical",
+            "error",
+            "warning",
+            "notice",
+            "info",
+            "debug",
+            "debug2",
+            "debug3",
+            "trace"
+            )
+        rule_debug_levels = (
+            "error",
+            "warning",
+            "notice",
+            "info",
+            "debug",
+            "trace",
+            )
+        self._parser.add_argument( "--ib-log-level",
                                    dest="log_level", type=str, default=None,
-                                   choices=all_levels,
+                                   choices=LogLevels(log_levels),
                                    help='Specify IronBee log level')
-        self._parser.add_argument( "--rule-log-level", "--rl",
+        self._parser.add_argument( "--rule-log-level",
                                    dest="rule_log_level", type=str, default=None,
-                                   choices=all_levels,
+                                   choices=LogLevels(log_levels),
                                    help='Specify IronBee rule log level')
-        self._parser.add_argument( "--rule-debug-level", "--rd",
+        self._parser.add_argument( "--rule-debug-level",
                                    dest="rule_debug_level", type=str, default=None,
-                                   choices=all_levels,
+                                   choices=LogLevels(rule_debug_levels),
                                    help='Specify IronBee rule debug level')
 
         self._parser.set_defaults( targets=("default",) )
