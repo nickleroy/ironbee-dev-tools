@@ -105,6 +105,10 @@ class _ToolValgrind( _Tool ) :
         prefix = list(self._prefix) + [ "-v" for i in range(self._verbose) ]
         return prefix
 
+class _IbParser( argparse.ArgumentParser ) :
+    def SetMain( self, main ) :
+        self._main = main
+
 class IbToolMain( object ) :
     _tools = {
         "none"     : _Tool( "none" ),
@@ -146,9 +150,9 @@ class IbToolMain( object ) :
     NameUpper = property(lambda self : self._defs.Lookup("NameUpper"))
 
     def ParserSetup( self ) :
-        self._parser = argparse.ArgumentParser( description="Run "+self.FullName+" with IronBee",
-                                                prog=os.path.basename(sys.argv[0]) )
-
+        self._parser = _IbParser( description="Run "+self.FullName+" with IronBee",
+                                  prog=os.path.basename(sys.argv[0]) )
+        self._parser.SetMain( self )
 
         self._parser.set_defaults( require_core=False )
         class CoreAction(argparse.Action):
@@ -184,6 +188,34 @@ class IbToolMain( object ) :
                                    action="store_true", dest="force_make", default=False,
                                    help="Force execution of make in etc directories")
 
+        log_levels = ("EMERGENCY",
+                      "ALERT",
+                      "CRITICAL",
+                      "ERROR",
+                      "WARNING",
+                      "NOTICE",
+                      "INFO",
+                      "DEBUG",
+                      "DEBUG2",
+                      "DEBUG3",
+                      "TRACE")
+        log_level_lower = tuple([ l.lower() for l in log_levels ])
+        log_level_cap = tuple([ l.capitalize() for l in log_levels ])
+        all_levels = log_levels + log_level_lower + log_level_cap
+        self._parser.add_argument( "--log-level", "-l",
+                                   dest="log_level", type=str, default=None,
+                                   choices=all_levels,
+                                   help='Specify IronBee log level')
+        self._parser.add_argument( "--rule-log-level", "--rl",
+                                   dest="rule_log_level", type=str, default=None,
+                                   choices=all_levels,
+                                   help='Specify IronBee rule log level')
+        self._parser.add_argument( "--rule-debug-level", "--rd",
+                                   dest="rule_debug_level", type=str, default=None,
+                                   choices=all_levels,
+                                   help='Specify IronBee rule debug level')
+
+        self._parser.set_defaults( targets=("default",) )
         self._parser.add_argument( "--out", "-o",
                                    dest="output", type=argparse.FileType('w'), default=None,
                                    help='Specify output file')
@@ -261,6 +293,14 @@ class IbToolMain( object ) :
             self._defs["PreCmds"]["Clean"] = [ "/bin/rm", "${LogFiles}" ]
         if self._args.force_make :
             self._defs.Append("MakeArgs", "-B")
+        if self._args.log_level is not None :
+            self._defs.Append("MakeArgs", "LOG_LEVEL="+self._args.log_level)
+        if self._args.rule_log_level is not None :
+            self._defs.Append("MakeArgs", "RULE_LOG_LEVEL="+self._args.rule_log_level)
+        if self._args.rule_debug_level is not None :
+            self._defs.Append("MakeArgs", "RULE_DEBUG_LEVEL="+self._args.rule_debug_level)
+        self._defs.Append("MakeArgs", self._args.targets)
+
         self._tool.SetVerbose( self._args.verbose )
 
         if self._args.read_last :
