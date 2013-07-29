@@ -23,6 +23,7 @@ import glob
 import subprocess
 import argparse
 from ibutil import *
+from ibversion import *
 
 class IbToolException(BaseException) : pass
 
@@ -133,6 +134,7 @@ class IbToolMain( object ) :
         "Cmd"           : [ "${Executable}", "${Args}" ],
         "IbLibDir"      : os.environ["IB_LIBDIR"],
         "IbEtc"         : "${EtcIn}/ironbee",
+        "IbVersion"     : None,
         "IbRnsEtc"      : "${EtcIn}/rns-ironbee",
         "PreCmds"       : { "IB"  : ["make", "-C", "${IbEtc}", "${MakeArgs}"], },
         "LastFile"      : '.ib-${NameLower}.last',
@@ -319,14 +321,32 @@ class IbToolMain( object ) :
         self._args, tool_args = self._parser.parse_known_args()
         self._args.tool_args = tool_args
 
-    def Setup( self ) :
-        for name,value in self._args.defs.items() :
-            self._defs.Set( name, value )
-        self._tool = self._tools[self._args.tool]
-        self._defs.SetDict( self._tool.Defs, over=False )
+    def GetIbVersion( self ) :
+        if self._defs.Lookup( 'IbVersion' ) is not None :
+            return
+        libdir = self._defs.Lookup( 'IbLibDir' )
+        tmp = IbVersionReader.FindFile( libdir )
+        if tmp is None :
+            self._parser.error( 'Unable to find library file in "'+libdir+'"' )
+        self._args.path = tmp
+        vreader = IbVersionReader( )
+        version = vreader.GetAutoVersion( self._args.path )
+        if version is None :
+            sys.exit(1)
+        self._version = version
+        self._defs.Set( 'IbVersion', version.Format(r'%{1}.%{2}.%{3}') )
 
-        if self._args.clean :
-            self._defs["PreCmds"]["Clean"] = [ "/bin/rm", "${LogFiles}" ]
+    def FindExecutable( self ) :
+        for p in ("${Prog}", "${Prog}.bin") :
+            path = self._defs.ExpandStr( p )
+            if not os.path.islink( path ):
+                self._defs.Set("Executable", p)
+                break
+        else :
+            self._parser.error( "No %s binary found" % (self.NameUpper) )
+
+    def SetupMakeArgs( self ) :
+        self._defs.Append("MakeArgs", "IB_VERSION="+self._defs.Lookup('IbVersion'))
         if self._args.verbose :
             self._defs.Append("MakeArgs", "DUMP=dump")
         if self._args.force_make :
@@ -339,21 +359,24 @@ class IbToolMain( object ) :
             self._defs.Append("MakeArgs", "RULE_DEBUG_LEVEL="+self._args.rule_debug_level)
         self._defs.Append("MakeArgs", self._args.targets)
 
+    def PostParse( self ) :
+        for name,value in self._args.defs.items() :
+            self._defs.Set( name, value )
+        self.GetIbVersion( )
+        self._tool = self._tools[self._args.tool]
         self._tool.SetVerbose( self._args.verbose )
+        self._defs.SetDict( self._tool.Defs, over=False )
+
+        self.FindExecutable( )
+        self.SetupMakeArgs( )
+
+        if self._args.clean :
+            self._defs["PreCmds"]["Clean"] = [ "/bin/rm", "${LogFiles}" ]
 
         if self._args.read_last :
             self.ReadLastFile( )
         if self._args.require_core  and  'CoreFile' not in self._defs :
             self._parser.error( "No core file specified" )
-
-    def FindExecutable( self ) :
-        for p in ("${Prog}", "${Prog}.bin") :
-            path = self._defs.ExpandStr( p )
-            if not os.path.islink( path ):
-                self._defs.Set("Executable", p)
-                break
-        else :
-            self._parser.error( "No %s binary found" % (self.NameUpper) )
 
     def GlobCmd( self, cmd ) :
         for n, arg in enumerate(cmd) :
@@ -504,8 +527,7 @@ class IbToolMain( object ) :
     def Main( self ) :
         self.ParserSetup( )
         self.Parse( )
-        self.Setup( )
-        self.FindExecutable( )
+        self.PostParse( )
         self.DumpTable( )
         self.RunPre( )
         self.RunProgram( )
