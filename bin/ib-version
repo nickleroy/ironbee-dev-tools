@@ -15,178 +15,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ****************************************************************************
-import re
 import os
 import sys
 import argparse
-import subprocess
-
-class IbVersion( object ) :
-    _match_regexs = [ ]
-    _search_regexs = [ ]
-    _initialized = False
-
-    @classmethod
-    def __InitClass( cls ) :
-        if cls._initialized :
-            return
-        regexs = ( r'(\d+)\.x\.x',
-                   r'(\d+)\.(\d+)\.x',
-                   r'(\d+)\.(\d+)\.(\d+)',
-                   r'(\d+)\.(\d+)',
-                   r'(\d+)' )
-        for n,regex in enumerate(regexs) :
-            cls._search_regexs.append( re.compile(regex) )
-            cls._match_regexs.append( re.compile('^'+regex+'$') )
-
-    def __init__( self, s, version=None ) :
-        self.__class__.__InitClass( )
-        if version is None :
-            version = self.ParseStr( s )
-            assert version is not None
-        else :
-            assert type(version) in (list, tuple)
-            assert 0 < len(version) <= 3
-            for v in version :
-                assert type(v) == int
-        self._s = s
-        self._version = tuple(version)
-
-    def _GetVersionItem( self, n ) :
-        try :
-            return self._version[n]
-        except IndexError :
-            return None
-
-    def GetElement( self, n ) :
-        return self._GetVersionItem( n )
-
-    Major    = property( lambda self : self._GetVersionItem(1) )
-    Minor    = property( lambda self : self._GetVersionItem(2) )
-    Release  = property( lambda self : self._GetVersionItem(2) )
-    String   = property( lambda self : self._s )
-    Version  = property( lambda self : self._version )
-    Elements = property( lambda self : len(self._version) )
-
-    def Compare( self, other ) :
-        for n in range( min(self.Elements, other.Elements) ) :
-            elem1 = self.GetElement(n)
-            elem2 = other.GetElement(n)
-            if elem1 == elem2 :
-                pass
-            else :
-                return elem2 - elem1
-        return 0
-
-    @classmethod
-    def ParseStr( cls, vstr, match=True ) :
-        cls.__InitClass( )
-        regexs = cls._match_regexs if match else cls._search_regexs
-        for regex in regexs :
-            m = regex.search( vstr )
-            if m is not None :
-                break
-        else :
-            return None
-        return tuple([ int(s) for s in m.groups()])
-
-    @classmethod
-    def CreateFromStr( cls, s, match=True ) :
-        cls.__InitClass( )
-        l = cls.ParseStr( s, match )
-        if l is None :
-            return None
-        return cls( s, l )
-
-    _term_formats = ('%{1}', '%{2}', '%{3}')
-    _norm_formats = ('%[1]', '%[2]', '%[3]')
-    _std_formats  = { r'\n':'\n', r'\t':'\t', r'\r':'\r', r'\b':'\b', r'\f':'\f', r'\\':'\\' }
-    def Format( self, format ) :
-        versions = [ str(n) for n in self._version ]
-        while len(versions) < 3 :
-            versions.append( 'x' )
-        for n, s in enumerate( self._term_formats ) :
-            index = format.find( s )
-            if index >= 0  and  len(self._version) < n :
-                format = format[:index]
-                break
-            format = format.replace( s, versions[n] )
-        for n, s in enumerate( self._norm_formats ) :
-            format = format.replace( s, versions[n] )
-        for pat, repl in self._std_formats.items() :
-            format = format.replace( pat, repl )
-        return format
-
-class IbVersionCmp( object ) :
-    _op_list = None
-    _initialized = False
-
-    @classmethod
-    def __InitClass( cls ) :
-        if cls._initialized :
-            return
-        cls._op_list = {
-            '==' : cls._CmpEq,
-            'eq' : cls._CmpEq,
-            '!=' : cls._CmpNe,
-            'ne' : cls._CmpEq,
-            '<'  : cls._CmpLt,
-            'lt' : cls._CmpLt,
-            '<=' : cls._CmpLtEq,
-            'le' : cls._CmpLtEq,
-            '>'  : cls._CmpGt,
-            'gt' : cls._CmpGt,
-            '>=' : cls._CmpGtEq,
-            'ge' : cls._CmpGtEq }
-
-    def __init__( self, opstr, version ) :
-        self.__class__.__InitClass( )
-        assert opstr in self._op_list
-        assert type(version) in ( str, IbVersion )
-        if type(version) == str :
-            version = IbVersion( version )
-        self._opstr   = opstr
-        self._op      = self._op_list[opstr]
-        self._version = version
-
-    OpStr   = property( lambda self : self._opstr )
-    Op      = property( lambda self : self._op )
-    Version = property( lambda self : self._version )
-
-    @classmethod
-    def CreateFromStrs( cls, opstr, verstr ) :
-        self.__class__.__InitClass( )
-        if opstr not in _op_list :
-            return None
-        version = IbVersion.CreateFromStr( verstr )
-        if version is None :
-            return None
-        return cls( opstr, version )
-
-    def _CmpEq( self, other ) :
-        return self.Version.Compare( other ) == 0
-
-    def _CmpNe( self, other ) :
-        return self.Version.Compare( other ) != 0
-
-    def _CmpLt( self, other ) :
-        return self.Version.Compare( other ) < 0
-
-    def _CmpLtEq( self, other ) :
-        return self.Version.Compare( other ) <= 0
-
-    def _CmpGt( self, other ) :
-        return self.Version.Compare( other ) > 0
-
-    def _CmpGtEq( self, other ) :
-        return self.Version.Compare( other ) >= 0
-
-    def Compare( self, verinfo ) :
-        assert type(verinfo) in (IbVersion, IbVersionCmp)
-        if type(verinfo) is IbVersion :
-            return self._op( self, verinfo )
-        elif type(verinfo) is IbVersionCmp :
-            return self._op( self, verinfo.Version )
+from   ibversion import *
 
 class Main( object ) :
     def __init__( self ) :
@@ -194,23 +26,20 @@ class Main( object ) :
                                                 prog="ib-version" )
 
     def Setup( self ) :
-        self._parser.add_argument( 'libdir',
+        self._parser.add_argument( 'path',
                                    nargs='?', default=os.environ.get("IB_LIBDIR"),
-                                   help='Lib directory to search in (default=$IB_LIBDIR)')
-
-        self._parser.add_argument( '--lib-file',
-                                   dest='lib_file', default=None,
-                                   help='Full path to library file to search' )
+                                   help='Lib directory to search in (default=$IB_LIBDIR) '\
+                                       'or path to file to examine')
 
         default_format = r'%{1}.%{2}.%{3}'
         self._parser.add_argument( '--format',
                                    dest='format',
                                    default=default_format,
-                                   help=('Specify printf-style format '+
-                                         'using %%[n] and %%{n} for element n. '
-                                         'The %%{n} version will terminate the string if element n '
-                                         'is past the end of the version information. '
-                                         'Default: "'+default_format.replace("%","%%")+'"') )
+                                   help='Specify printf-style format '\
+                                       'using %%[n] and %%{n} for element n. '\
+                                       'The %%{n} version will terminate the string if element n '\
+                                       'is past the end of the version information. '\
+                                       'Default: "'+default_format.replace("%","%%")+'"' )
 
         self._parser.set_defaults( vercmp=None )
         class CompareAction(argparse.Action):
@@ -233,41 +62,21 @@ class Main( object ) :
 
     def Parse( self ) :
         self._args = self._parser.parse_args()
-        if self._args.lib_file is None :
-            if self._args.libdir is None :
-                self._parser.error( "No libdir specified" )
-            elif not os.path.isdir( self._args.libdir ) :
-                self._parser.error( "Specified directory %s is not a directory" % (self._args.libdir) )
-            lib_file = os.path.join( self._args.libdir, "libironbee.a" )
-        else :
-            lib_file = self._args.lib_file
-        if not os.path.isfile( lib_file ) :
-            self._parser.error( "Lib file %s is not a file" % (lib_file) )
-        self._args.lib_file = lib_file
-            
 
     Execute = property( lambda self : self._args.verbose )
     Verbose = property( lambda self : self._args.verbose )
     Quiet   = property( lambda self : self._args.verbose )
 
-    def GetVersion( self ) :
-        cmd = ( 'strings', '-a', self._args.lib_file )
-        pattern = "IronBee/"
-        try :
-            for line in subprocess.check_output( cmd ).split('\n') :
-                if line.startswith( pattern ) :
-                    s = line.rstrip().replace(pattern, "")
-                    version = IbVersion.CreateFromStr(line.rstrip().replace(pattern, ""))
-                    if version is not None :
-                        return version
-            print >>sys.stderr, "No version string found in", self._args.lib_file
-            return None
-        except subprocess.CalledProcessError as e:
-            print >>sys.stderr, "Unable to get strings from", self._args.lib_file
-            return None
+    def FindFile( self ) :
+        tmp = IbVersionReader.FindFile( self._args.path )
+        if tmp is None :
+            self._parser.error( 'Unable to find library file in "'+self._args.path+'"' )
+        self._args.path = tmp
 
     def Run( self ) :
-        version = self.GetVersion( )
+        self.FindFile( )
+        vreader = IbVersionReader( )
+        version = vreader.GetAutoVersion( self._args.path )
         if version is None :
             sys.exit(1)
         if self._args.vercmp is not None :
