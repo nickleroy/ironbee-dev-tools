@@ -270,6 +270,10 @@ class IbToolMain( object ) :
                                    action="store_false", dest="precmds", default=True,
                                    help="Disable running of pre-commands")
 
+        self._parser.add_argument( "--disable-main",
+                                   action="store_false", dest="main", default=True,
+                                   help="Disable running of "+self.Name )
+
         self._parser.add_argument( "--read-last",
                                    action="store_true", dest="read_last", default=True,
                                    help="Enable reading of the last file")
@@ -484,7 +488,7 @@ class IbToolMain( object ) :
         if self._args.verbose :
             print "LUA_PATH set to", luapath
 
-        if not self._args.execute :
+        if not self._args.execute  or  not self._args.main :
             print "Not running:", cmd
             return
 
