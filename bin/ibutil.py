@@ -35,6 +35,9 @@ class IbDict( dict ):
                 self._fn(data, self._value)
             return self._value
 
+        def __str__( self ) :
+            return str(self._value)
+
     def Set( self, k, v, fn=None, over=True ) :
         if over == False and k in self :
             return
