@@ -51,15 +51,18 @@ class IbVersion( object ) :
         if elements is None :
             elements = self.StrToList( s )
             if elements is None :
-                raise IbInvalidVersion( s )
+                raise IbInvalidVersion( '"'+s+'"' )
         else :
             if type(elements) not in (list, tuple)  or  len(elements) not in (1,2,3) :
                 raise IbInvalidVersion( str(elements) )
             for v in elements :
-                if type(v) != int :
+                if type(v) == str :
+                    raise IbInvalidVersion( '"'+elements+'"' )
+                elif type(v) != int :
                     raise IbInvalidVersion( str(elements) )
         self._s = s
         self._elements = tuple(elements)
+        self._file = None
 
     def _GetVersionItem( self, n ) :
         try :
@@ -70,6 +73,9 @@ class IbVersion( object ) :
     def GetElement( self, n ) :
         return self._GetVersionItem( n )
 
+    def _SetPath( self, path ) :
+        self._path = path
+
     Major     = property( lambda self : self._GetVersionItem(1) )
     Minor     = property( lambda self : self._GetVersionItem(2) )
     Release   = property( lambda self : self._GetVersionItem(2) )
@@ -77,6 +83,9 @@ class IbVersion( object ) :
     Elements  = property( lambda self : len(self._elements) )
     String    = property( lambda self : str(self._elements) )
     RawString = property( lambda self : self._elements )
+    Path      = property( lambda self : self._path, _SetPath )
+
+    DefaultFormat = property( lambda self : "%{1}.%{2}.%{3}" )
 
     def Compare( self, other ) :
         for n in range( min(self.Elements, other.Elements) ) :
@@ -111,7 +120,9 @@ class IbVersion( object ) :
     _term_formats = ('%{1}', '%{2}', '%{3}')
     _norm_formats = ('%[1]', '%[2]', '%[3]')
     _std_formats  = { r'\n':'\n', r'\t':'\t', r'\r':'\r', r'\b':'\b', r'\f':'\f', r'\\':'\\' }
-    def Format( self, format ) :
+    def Format( self, format=None ) :
+        if format is None :
+            format = self.DefaultFormat
         versions = [ str(n) for n in self._elements ]
         while len(versions) < 3 :
             versions.append( 'x' )
@@ -203,12 +214,12 @@ class IbVersionComparer( object ) :
     @classmethod
     def _CheckVersion( cls, ver ) :
         if ver is None  or  type(ver) is not IbVersion :
-            raise IbInvalidVersion( str(ver) )
+            raise IbInvalidVersion( '"'+str(ver)+'"' )
 
     @classmethod
     def _CheckOp( cls, op ) :
         if op is None  or  type(op) is not _IbVersionCmpOp :
-            raise IbInvalidVerOp( str(op) )
+            raise IbInvalidVerOp( '"'+str(op)+'"' )
 
     @classmethod
     def _MakeVersion( cls, vstr ) :
@@ -221,7 +232,7 @@ class IbVersionComparer( object ) :
         else :
             ver = None
         if ver is None :
-            raise IbInvalidVersion( str(vstr) )
+            raise IbInvalidVersion( '"'+str(vstr)+'"' )
         else :
             return ver
 
@@ -234,7 +245,7 @@ class IbVersionComparer( object ) :
         else :
             op = None
         if op is None :
-            raise IbInvalidVerOp( str(opstr) )
+            raise IbInvalidVerOp( '"'+str(opstr)+'"' )
         else :
             return op
 
@@ -289,10 +300,11 @@ class IbVersionReader( object ) :
 
     def GetAutoVersion( self, path ) :
         ftype = self._magic.file( os.path.realpath(path) )
+        self._last_path = path
         if 'ASCII' in ftype  or  'text' in ftype :
             return self.GetTextVersion( path )
         else :
-            return self.GetBinVersion2( path )
+            return self.GetBinVersion( path )
 
     _printable = frozenset(string.printable)
     def GetStrings( self, fp ) :
@@ -311,7 +323,7 @@ class IbVersionReader( object ) :
                     found_str = ""
 
     _bin_re = re.compile( r"IronBee/([\d\.]+)" )
-    def GetBinVersion2( self, path ) :
+    def GetBinVersion( self, path ) :
         try :
             fp = open(path, "rb")
             for line in self.GetStrings( fp ) :
@@ -320,23 +332,10 @@ class IbVersionReader( object ) :
                     continue
                 version = IbVersion.CreateFromStr( m.group(1) )
                 if version is not None :
+                    version.Path = path
                     return version
             return None
         except IOError as e :
-            return None
-
-    def GetBinVersion( self, path ) :
-        cmd = ( 'strings', '-a', path )
-        try :
-            for line in subprocess.check_output( cmd ).split('\n') :
-                m = self._bin_re.match( line )
-                if m is None :
-                    continue
-                version = IbVersion.CreateFromStr( m.group(1) )
-                if version is not None :
-                    return version
-            return None
-        except subprocess.CalledProcessError as e:
             return None
 
     def GetTextVersion( self, path ) :
@@ -347,6 +346,7 @@ class IbVersionReader( object ) :
                 continue
             version = IbVersion.CreateFromStr( m.group(1) )
             if version is not None :
+                version.Path = path
                 return version
         return None
 
