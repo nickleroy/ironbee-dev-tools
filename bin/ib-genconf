@@ -26,6 +26,17 @@ import netifaces
 import socket
 
 from ibutil import *
+from ibversion import *
+
+def IsTrue( val ) : return val
+
+def CheckIbVersion( vs1, opstr, vs2 ) :
+    print 'Comparing "%s %s %s"' % (vs1, opstr, vs2)
+    try:
+        return IbVersionComparer.CompareVersionsStr( vs1, opstr, vs2 )
+    except IbVersionException as e:
+        print "Failed to compare versions:", e
+        raise
 
 class Main( object ) :
     def __init__( self ) :
@@ -149,6 +160,7 @@ class Main( object ) :
     __IfRe2      = re.compile( r'\$\{if\s+(\S+)\s+(.*)\}$', re.I )
     __IfStartRe  = re.compile( r'\$\{if\s+"([^"]+)"\s*\}$', re.I )
     __IfStartRe2 = re.compile( r'\$\{if\s+(\S+)\s*\}$', re.I )
+    __IfElseRe   = re.compile( r'\$\{else\s*\}$', re.I )
     __IfEndRe    = re.compile( r'\$\{endif\s*\}$', re.I )
     __SetRe1     = re.compile( r'\$\{set (\w+)\s+(.*?)\s*\}$', re.I)
     __SetRe2     = re.compile( r'\$\{set (\w+)\s+"(.*)"\s*\}$', re.I)
@@ -192,10 +204,11 @@ class Main( object ) :
         if m is None :
             m = self.__IfStartRe2.match( line )
         if m is not None :
+            expr = self.Expand( m.group(1) )
             try :
-                expr = self.Expand( m.group(1) )
                 v = eval(expr)
-            except (SyntaxError, NameError) as e :
+            except (BaseException) as e :
+                print >>sys.stderr, 'if: Failed to eval "'+expr+'"'
                 v = False
             self._stack.append( v )
             penable = enable
@@ -203,6 +216,16 @@ class Main( object ) :
                 enable = v
             if self.Verbose >= 2 :
                 print "  if: enable was %s, now %s" % ( str(penable), str(enable) )
+
+        # Check for ${else "<expr>"}
+        elif self.__IfElseRe.match( line ) :
+            if len(self._stack) == 0 :
+                print >>sys.stderr, 'Mismatched ${endif} @ '+fp.name+':', lno
+                sys.exit(1)
+            penable = enable
+            enable = not enable
+            if self.Verbose >= 2 :
+                print "  else: enable was %s, now %s" % ( str(penable), str(enable) )
 
         # Check for ${endif "<expr>"}
         elif self.__IfEndRe.match( line ) :
