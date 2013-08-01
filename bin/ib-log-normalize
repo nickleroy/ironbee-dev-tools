@@ -1,0 +1,179 @@
+#! /usr/bin/env python
+# ****************************************************************************
+# Licensed to Qualys, Inc. (QUALYS) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# QUALYS licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ****************************************************************************
+import os
+import sys
+import re
+import time
+import argparse
+
+class Main( object ) :
+    def __init__( self ) :
+        self._parser = argparse.ArgumentParser( description="IronBee Log Normalizer",
+                                                prog="ib-log-normalize" )
+
+    def ParserSetup( self ) :
+        self._parser.add_argument( "infile", type=argparse.FileType('r'),
+                                   help='input file')
+
+        self._parser.add_argument( "outfile", type=argparse.FileType('w'), nargs='?',
+                                   default=sys.stdout,
+                                   help='output file')
+
+        self._parser.add_argument( "--time",
+                                   action="store", dest="time", default='relative',
+                                   choices=('leave', 'remove', 'relative', 'relative-tx'),
+                                   help="Specify how to handle time stamps" )
+
+        self._parser.add_argument( "--source",
+                                   action="store", dest="source", default='remove-num',
+                                   choices=('leave', 'remove', 'remove-num'),
+                                   help="Specify how to handle source line info" )
+
+        self._parser.add_argument( "--pointer",
+                                   action="store", dest="pointer", default='num',
+                                   choices=('leave', 'zero', 'remove', 'num'),
+                                   help="Specify how to handle source line info" )
+
+        self._parser.add_argument( "--skip-config",
+                                   action="store_true", dest="skip_config", default=True,
+                                   help="Skip configuration lines" )
+
+        self._parser.add_argument( "-v", "--verbose",
+                                   action="count", dest="verbose", default=0,
+                                   help="Increment verbosity level" )
+
+        self._parser.add_argument( "-q", "--quiet",
+                                   action="store_true", dest="quiet", default=False,
+                                   help="be vewwy quiet (I'm hunting wabbits)" )
+
+    def ParserExecute( self ) :
+        self._args, self._lua_args = self._parser.parse_known_args()
+
+    Execute = property( lambda self : self._args.verbose )
+    Verbose = property( lambda self : self._args.verbose )
+    Quiet   = property( lambda self : self._args.verbose )
+
+    _TimeRe = re.compile( r'((\d{4})-(\d{2})-(\d{2})T' \
+                          r'(\d{2}):(\d{2}):(\d{2})\.(\d{4,})([-\+]\d{4}))' )
+    _PidRe  = re.compile( r'\ \[(\d+)\] ' )
+    _TxRe   = re.compile( r'\ \[tx:([a-f0-9\-]{36})\] ' )
+    _PtrRe  = re.compile( r'(0x[\da-fA-F]+)' )
+    _SrcRe  = re.compile( r' (\(([\w\./]+):(\d+\s*)\))' )
+    def Run( self ) :
+        cont = None
+        pid = None
+        txs = { }
+        ptrs = { }
+        starttime = None
+        conn = False
+        for n,line in enumerate(self._args.infile) :
+            line = line.rstrip()
+            linenum = n+1
+
+            if 'CONFIG Passing "' in line  and  line.count( '"' ) % 2 :
+                cont = line
+                continue
+            elif cont is not None :
+                assert line.startswith( '"' )
+                line = cont + line
+                linenum -= 1
+                cont = None
+
+            if 'CONN EVENT' in line :
+                conn = True
+            if self._args.skip_config  and  not conn :
+                continue
+
+            # Fixup time stamp
+            try :
+                m = self._TimeRe.match( line )
+                timestr = m.group(1)
+                tstr = "%s-%s-%s %s:%s:%s" % m.groups()[1:-2]
+                timeinfo = time.strptime( tstr, r'%Y-%m-%d %H:%M:%S' )
+                timefloat = time.mktime( timeinfo )
+                timefloat += float('0.'+m.group(8))
+                if starttime is None :
+                    starttime = timefloat
+                if self._args.time == 'relative' :
+                    line = line.replace(timestr, '%012.6f' % (timefloat - starttime) )
+                elif self._args.time == 'remove' :
+                    line = line.replace(timestr+' ', '')
+            except AttributeError as e :
+                print >>sys.stderr, "Ignoring line ", linenum
+                continue
+            
+            # Fixup PID
+            pidinfo  = self._PidRe.search( line ).group(1)
+            line = line.replace( ' ['+pidinfo+']', '' )
+            if pid is None :
+                pid = pidinfo
+            else :
+                assert pid == pidinfo
+            line = line.replace( ' ['+pidinfo+']', '' )
+            
+            # Fixup source
+            if self._args.source != 'leave' :
+                m = self._SrcRe.search( line )
+                if m is not None :
+                    if self._args.source == 'remove' :
+                        line = line.replace( m.group(1), '' )
+                    else :
+                        line = line.replace( m.group(3), '' )
+
+            # Fixup TX UUID
+            try :
+                txinfo = self._TxRe.search( line ).group(1)
+                if txinfo not in txs :
+                    txs[txinfo] = len(txs)
+                line = line.replace( txinfo, '%05d' % txs[txinfo] )
+            except AttributeError as e :
+                txinfo = None
+
+            # Fixup pointers
+            if self._args.pointer != 'leave' :
+                while True :
+                    m = self._PtrRe.search( line )
+                    if m is None :
+                        break
+                    ptr = m.group(1)
+                    if ptr not in ptrs :
+                        ptrs[ptr] = len(ptrs)
+                    if self._args.pointer == 'remove' :
+                        line = line.replace( ptr, '' )
+                    elif self._args.pointer == 'zero' :
+                        line = line.replace( ptr, '0X0000' )
+                    elif self._args.pointer == 'num' :
+                        line = line.replace( ptr, 'PTR-%06x' % ptrs[ptr] )
+
+            # Write out the modified line
+            print >>self._args.outfile, line
+
+    def Main( self ) :
+        self.ParserSetup( )
+        self.ParserExecute( )
+        self.Run( )
+
+main = Main( )
+main.Main( )
+
+### Local Variables: ***
+### py-indent-offset:4 ***
+### python-indent:4 ***
+### python-continuation-offset:4 ***
+### tab-width:4  ***
+### End: ***
