@@ -21,6 +21,15 @@ import re
 import time
 import argparse
 
+class TxData( object ) :
+    def __init__( self, num, fh, t ) :
+        self._num = num
+        self._fh = fh
+        self._time = t
+    Num    = property( lambda self : self._num )
+    Handle = property( lambda self : self._fh )
+    Time   = property( lambda self : self._time )
+
 class Main( object ) :
     def __init__( self ) :
         self._parser = argparse.ArgumentParser( description="IronBee Log Normalizer",
@@ -33,6 +42,10 @@ class Main( object ) :
         self._parser.add_argument( "outfile", type=argparse.FileType('w'), nargs='?',
                                    default=sys.stdout,
                                    help='output file')
+
+        self._parser.add_argument( "--tx-files",
+                                   dest='txfiles', default=None,
+                                   help='Store output in numbered tx files ("<f>.format(n)")' )
 
         self._parser.add_argument( "--time",
                                    action="store", dest="time", default='relative',
@@ -68,22 +81,27 @@ class Main( object ) :
     Verbose = property( lambda self : self._args.verbose )
     Quiet   = property( lambda self : self._args.verbose )
 
-    _TimeRe = re.compile( r'((\d{4})-(\d{2})-(\d{2})T' \
-                          r'(\d{2}):(\d{2}):(\d{2})\.(\d{4,})([-\+]\d{4}))' )
-    _PidRe  = re.compile( r'\ \[(\d+)\] ' )
-    _TxRe   = re.compile( r'\ \[tx:([a-f0-9\-]{36})\] ' )
-    _PtrRe  = re.compile( r'(0x[\da-fA-F]+)' )
-    _SrcRe  = re.compile( r' (\(([\w\./]+):(\d+\s*)\))' )
+    _Time1Re = re.compile( r'((\d{4})-(\d{2})-(\d{2})T' \
+                           r'(\d{2}):(\d{2}):(\d{2})\.(\d{4,})([-\+]\d{4}))' )
+    _Time2Re = re.compile( r'((\d{4})(\d{2})(\d{2})\.' \
+                           r'(\d{2})h(\d{2})m(\d{2})s)' )
+    _PidRe   = re.compile( r'\ \[(\d+)\] ' )
+    _TxRe    = re.compile( r'\ \[tx:([a-f0-9\-]{36})\] ' )
+    _PtrRe   = re.compile( r'(0x[\da-fA-F]+)' )
+    _SrcRe   = re.compile( r' (\(([\w\./]+):(\d+\s*)\))' )
+    _PostConfRe = re.compile(r'(?:\ \[tx:[a-f0-9\-]{36}\] |CONN EVENT)' )
+
     def Run( self ) :
         cont = None
         pid = None
         txs = { }
         ptrs = { }
         starttime = None
-        conn = False
+        config = True
         for n,line in enumerate(self._args.infile) :
             line = line.rstrip()
             linenum = n+1
+            timefloat = 0.0
 
             if 'CONFIG Passing "' in line  and  line.count( '"' ) % 2 :
                 cont = line
@@ -94,23 +112,47 @@ class Main( object ) :
                 linenum -= 1
                 cont = None
 
-            if 'CONN EVENT' in line :
-                conn = True
-            if self._args.skip_config  and  not conn :
+                
+            if config  and  self._PostConfRe.search( line ) :
+                config = False
+            if self._args.skip_config  and  config :
                 continue
+
+            try :
+                uuid = self._TxRe.search( line ).group(1)
+                txdata = txs.get(uuid)
+            except AttributeError as e :
+                uuid = None
+                txdata = None
 
             # Fixup time stamp
             try :
-                m = self._TimeRe.match( line )
+                m = self._Time1Re.match( line )
+                if m is None :
+                    m = self._Time2Re.match( line )
+                if m is None :
+                    print >>sys.stderr, "Ignoring line ", linenum
+                    continue
                 timestr = m.group(1)
-                tstr = "%s-%s-%s %s:%s:%s" % m.groups()[1:-2]
+                tstr = "%s-%s-%s %s:%s:%s" % m.groups()[1:7]
                 timeinfo = time.strptime( tstr, r'%Y-%m-%d %H:%M:%S' )
                 timefloat = time.mktime( timeinfo )
-                timefloat += float('0.'+m.group(8))
+                try :
+                    timefloat += float('0.'+m.group(8))
+                except IndexError :
+                    pass
                 if starttime is None :
                     starttime = timefloat
                 if self._args.time == 'relative' :
                     line = line.replace(timestr, '%012.6f' % (timefloat - starttime) )
+                elif self._args.time == 'relative-tx' :
+                    if uuid is None :
+                        txstart = starttime
+                    elif txdata is None :
+                        txstart = timefloat
+                    else :
+                        txstart = txdata.Time
+                    line = line.replace(timestr, '%012.6f' % (timefloat - txstart) )
                 elif self._args.time == 'remove' :
                     line = line.replace(timestr+' ', '')
             except AttributeError as e :
@@ -118,13 +160,16 @@ class Main( object ) :
                 continue
             
             # Fixup PID
-            pidinfo  = self._PidRe.search( line ).group(1)
-            line = line.replace( ' ['+pidinfo+']', '' )
-            if pid is None :
-                pid = pidinfo
-            else :
-                assert pid == pidinfo
-            line = line.replace( ' ['+pidinfo+']', '' )
+            try :
+                pidinfo  = self._PidRe.search( line ).group(1)
+                line = line.replace( ' ['+pidinfo+']', '' )
+                if pid is None :
+                    pid = pidinfo
+                else :
+                    assert pid == pidinfo
+                line = line.replace( ' ['+pidinfo+']', '' )
+            except AttributeError :
+                pass
             
             # Fixup source
             if self._args.source != 'leave' :
@@ -136,13 +181,22 @@ class Main( object ) :
                         line = line.replace( m.group(3), '' )
 
             # Fixup TX UUID
-            try :
-                txinfo = self._TxRe.search( line ).group(1)
-                if txinfo not in txs :
-                    txs[txinfo] = len(txs)
-                line = line.replace( txinfo, '%05d' % txs[txinfo] )
-            except AttributeError as e :
-                txinfo = None
+            if uuid is not None :
+                if txdata is None :
+                    if self._args.txfiles is None :
+                        fh = sys.stdout
+                        num = len(txs)
+                    else :
+                        path = self._args.txfiles.format( len(txs) )
+                        fh = open( path, 'w' )
+                        if not self._args.quiet :
+                            print "Created tx file", path, "for transaction", len(txs)
+                        num = 0
+                    txdata = TxData(num, fh, timefloat)
+                    txs[uuid] = txdata
+                if txdata is not None :
+                    new = '{:05d}'.format(txdata.Num)
+                    line = line.replace( uuid, new )
 
             # Fixup pointers
             if self._args.pointer != 'leave' :
@@ -161,7 +215,10 @@ class Main( object ) :
                         line = line.replace( ptr, 'PTR-%06x' % ptrs[ptr] )
 
             # Write out the modified line
-            print >>self._args.outfile, line
+            if txdata is None :
+                print >>self._args.outfile, line
+            else :
+                print >>txdata.Handle, line
 
     def Main( self ) :
         self.ParserSetup( )
