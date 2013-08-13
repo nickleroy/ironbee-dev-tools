@@ -138,8 +138,9 @@ class IbToolMain( object ) :
         "IbRnsEtc"      : "${EtcIn}/rns-ironbee",
         "PreCmds"       : { "IB"  : ["make", "-C", "${IbEtc}", "${MakeArgs}"], },
         "LastFile"      : '.ib-${NameLower}.last',
-        "LuaDir"        : os.path.join(os.environ["IB_LIBDIR"], "lua"),
-        "LuaPath"       : ";".join([s+"/?.lua" for s in "${LuaDir}", "${Etc}/ironbee"]),
+        "LuaDir"        : os.path.join("${IbLibDir}", "lua"),
+        "LuaPath"       : ";".join([s+"/?.lua" for s in
+                                    ("${IbLibDir}", "${LuaDir}", "${Etc}/ironbee")]),
     }
 
     def __init__( self, defs ) :
