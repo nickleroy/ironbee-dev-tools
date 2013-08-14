@@ -22,15 +22,74 @@ import time
 import argparse
 
 class TxData( object ) :
-    def __init__( self, num, fh, t ) :
+    def __init__( self, num, real, ctime, fh=None, path=None ) :
         self._num = num
+        self._real = real
         self._fh = fh
-        self._time = t
-    Num    = property( lambda self : self._num )
-    Handle = property( lambda self : self._fh )
-    Time   = property( lambda self : self._time )
+        self._path = path
+        self._ctime = ctime
+        self._mtime = ctime
+
+    @classmethod
+    def Create( cls, num, real, _ctime, path) :
+        fh = open( path, 'w' )
+        return cls( num, real, _ctime, fh=fh, path=path )
+
+    def ReOpen( self ) :
+        if self._fh is None :
+            self._fh = open( self._path, 'a' )
+
+    def Touch( self, mtime ) :
+        self._mtime = mtime
+
+    def Close( self ) :
+        if self._fh is not None  and  self._path is not None :
+            self._fh.close( )
+            self._fh = None
+
+    Num     = property( lambda self : self._num )
+    RealNum = property( lambda self : self._real )
+    Handle  = property( lambda self : self._fh )
+    Path    = property( lambda self : self._path )
+    Ctime   = property( lambda self : self._ctime )
+    Mtime   = property( lambda self : self._mtime )
+
 
 class Main( object ) :
+    _LogLevels = (
+        'EMERGENCY',
+        'ALERT',
+        'CRITICAL',
+        'ERROR',
+        'WARNING',
+        'NOTICE',
+        'INFO',
+        'DEBUG',
+        'DEBUG2',
+        'DEBUG3',
+        'TRACE')
+    _LogLevelPat = r'(' + r'|'.join(_LogLevels) + r')'
+    _RuleLogStrings = (
+        'RULE_START',
+        'RULE_END',
+        'TX_START',
+        'TX_END',
+        'REQ_HEADER'
+        'RES_LINE'
+        'REQ_BODY',
+        'RES_HEADER'
+        'RES_LINE',
+        'RES_BODY',
+        'AUDIT',
+        'PHASE',
+        'TFN',
+        'ACTION',
+        'EVENT',
+        'TARGET',
+        'TRUE', 'FALSE', 'ERROR',
+        'OP',
+        )
+
     def __init__( self ) :
         self._parser = argparse.ArgumentParser( description="IronBee Log Normalizer",
                                                 prog="ib-log-normalize" )
@@ -62,6 +121,43 @@ class Main( object ) :
                                    choices=('leave', 'zero', 'remove', 'num'),
                                    help="Specify how to handle source line info" )
 
+        class RemapAction(argparse.Action):
+            _range_re = re.compile( Main._LogLevelPat+r'(?:\-'+Main._LogLevelPat+r')?$', re.I )
+            def __call__(self, parser, namespace, values, option_string=None):
+                for s in values :
+                    try :
+                        orig, new = s.split('=', 1)
+                        new_uc = new.upper()
+                        if len(new_uc)  and  new_uc not in Main._LogLevels :
+                            parser.error( '"{:s}" is not a valid log level'.format(new) )
+                        for pat in orig.split(',') :
+                            m = self._range_re.match(pat)
+                            if m is None :
+                                parser.error( '"{:s}" is not a valid log level [1]'.format(pat) )
+                            elif m.group(2) is None :
+                                names = [ pat ]
+                            else :
+                                l1 = Main._LogLevels.index(m.group(1).upper())
+                                l2 = Main._LogLevels.index(m.group(2).upper())
+                                names = [ Main._LogLevels[i] for i in range(l1, l2)]
+                            for name in names :
+                                name_uc = name.upper()
+                                if name_uc not in Main._LogLevels :
+                                    parser.error(
+                                        '"{:s}" is not a valid log level [2]'.format(name) )
+                                else :
+                                    namespace.log_remap[name_uc] = new_uc
+                    except ValueError :
+                        parser.error( 'Invalid remap "%s": no new name'%(s) )
+        self._parser.set_defaults( log_remap={} )
+        self._parser.add_argument( "--log-remap",
+                                   action=RemapAction, nargs='+',
+                                   help="Remap log levels (name[,name]=[new])" )
+
+        self._parser.add_argument( "--filter-rules",
+                                   action="store_true", dest="filter_rules", default=False,
+                                   help="Filter out verbose rule logs" )
+
         self._parser.add_argument( "--skip-config",
                                    action="store_true", dest="skip_config", default=True,
                                    help="Skip configuration lines" )
@@ -81,25 +177,31 @@ class Main( object ) :
     Verbose = property( lambda self : self._args.verbose )
     Quiet   = property( lambda self : self._args.verbose )
 
-    _Time1Re = re.compile( r'((\d{4})-(\d{2})-(\d{2})T' \
-                           r'(\d{2}):(\d{2}):(\d{2})\.(\d{4,})([-\+]\d{4}))' )
-    _Time2Re = re.compile( r'((\d{4})(\d{2})(\d{2})\.' \
-                           r'(\d{2})h(\d{2})m(\d{2})s)' )
-    _PidRe   = re.compile( r'\ \[(\d+)\] ' )
-    _TxRe    = re.compile( r'\ \[tx:([a-f0-9\-]{36})\] ' )
-    _PtrRe   = re.compile( r'(0x[\da-fA-F]+)' )
-    _SrcRe   = re.compile( r' (\(([\w\./]+):(\d+\s*)\))' )
-    _PostConfRe = re.compile(r'(?:\ \[tx:[a-f0-9\-]{36}\] |CONN EVENT)' )
+    _Time1Re    = re.compile( r'((\d{4})-(\d{2})-(\d{2})T' \
+                              r'(\d{2}):(\d{2}):(\d{2})\.(\d{4,})([-\+]\d{4}))' )
+    _Time2Re    = re.compile( r'((\d{4})(\d{2})(\d{2})\.' \
+                              r'(\d{2})h(\d{2})m(\d{2})s)' )
+    _PidRe      = re.compile( r'\ \[(\d+)\] ' )
+    _TxRe       = re.compile( r'\ \[tx:([a-f0-9\-]{36})\] ' )
+    _PtrRe      = re.compile( r'(0x[\da-fA-F]+)' )
+    _SrcRe      = re.compile( r' (\(\s*([\w\./]+):(\d+\s*)\))' )
+    _LevelRe    = re.compile( r' ((' + r'|'.join(_LogLevels) + r')\s+ )-' )
+    _RuleRe     = re.compile( r' \[rule:"[\w\-\.\d/]+" rev:\d+\] ' )
+    _RuleLogRe  = re.compile( r'(?: ' + r'|'.join(_RuleLogStrings) + r')' )
+    _PostConfRe = re.compile( r'(?: \[tx:[a-f0-9\-]{36}\] |CONN EVENT)' )
 
     def Run( self ) :
         cont = None
         pid = None
         txs = { }
+        numtx = 0
         ptrs = { }
         starttime = None
+        cleantime = None
         config = True
         for n,line in enumerate(self._args.infile) :
             line = line.rstrip()
+            orig = line
             linenum = n+1
             timefloat = 0.0
 
@@ -112,7 +214,7 @@ class Main( object ) :
                 linenum -= 1
                 cont = None
 
-                
+
             if config  and  self._PostConfRe.search( line ) :
                 config = False
             if self._args.skip_config  and  config :
@@ -151,14 +253,46 @@ class Main( object ) :
                     elif txdata is None :
                         txstart = timefloat
                     else :
-                        txstart = txdata.Time
+                        txstart = txdata.Mtime
                     line = line.replace(timestr, '%012.6f' % (timefloat - txstart) )
                 elif self._args.time == 'remove' :
                     line = line.replace(timestr+' ', '')
             except AttributeError as e :
                 print >>sys.stderr, "Ignoring line ", linenum
                 continue
-            
+
+            # Filter vebose rule logging
+            if self._args.filter_rules  and  self._RuleRe.search( line ) :
+                if not self._RuleLogRe.search( line ) :
+                    continue
+
+            # Clean up old transactions
+            if timefloat is not None :
+                if cleantime is None :
+                    cleantime = timefloat + (5 * 60)
+                elif timefloat >= cleantime :
+                    cleantime = timefloat + (5 * 60)
+                    clean_mtime = timefloat - (60 * 60)
+                    close_mtime = timefloat -  (2 * 60)
+                    for uuid,txdata in txs.items( ) :
+                        if txdata is not None  and  txdata.Mtime < clean_mtime :
+                            txdata = None
+                            txs[uuid] = None
+
+                        if txdata is not None  and  txdata.Mtime < close_mtime :
+                            txdata.Close()
+                
+            # Fixup log levels
+            m = self._LevelRe.search( line )
+            if m is not None :
+                level = m.group(2)
+                slen = len(m.group(1))
+                new = self._args.log_remap.get(level)
+                if new is not None :
+                    while len(new) <= slen :
+                        new += ' '
+                    line = line.replace( level, new )
+
             # Fixup PID
             try :
                 pidinfo  = self._PidRe.search( line ).group(1)
@@ -170,30 +304,33 @@ class Main( object ) :
                 line = line.replace( ' ['+pidinfo+']', '' )
             except AttributeError :
                 pass
-            
+
             # Fixup source
             if self._args.source != 'leave' :
                 m = self._SrcRe.search( line )
                 if m is not None :
-                    if self._args.source == 'remove' :
-                        line = line.replace( m.group(1), '' )
-                    else :
-                        line = line.replace( m.group(3), '' )
+                    old = m.group(1) if self._args.source == 'remove' else m.group(3)
+                    line = line.replace( old, '' )
 
             # Fixup TX UUID
             if uuid is not None :
                 if txdata is None :
                     if self._args.txfiles is None :
-                        fh = sys.stdout
-                        num = len(txs)
+                        txdata = TxData(numtx, numtx, timefloat, fh=self._args.outfile)
                     else :
-                        path = self._args.txfiles.format( len(txs) )
-                        fh = open( path, 'w' )
+                        path = self._args.txfiles.format( numtx )
+                        txdata = TxData.Create(0, numtx, timefloat, path)
                         if not self._args.quiet :
-                            print "Created tx file", path, "for transaction", len(txs)
-                        num = 0
-                    txdata = TxData(num, fh, timefloat)
+                            print "Created tx file", path, "for transaction", numtx
                     txs[uuid] = txdata
+                    numtx += 1
+                elif txdata.Handle is None :
+                    txdata.Touch( timefloat )
+                    txdata.ReOpen( )
+                    if not self._args.quiet :
+                        print "Re-opened tx file", txdata.Path, "for transaction", txdata.RealNum
+                else :
+                    txdata.Touch( timefloat )
                 if txdata is not None :
                     new = '{:05d}'.format(txdata.Num)
                     line = line.replace( uuid, new )
@@ -219,6 +356,8 @@ class Main( object ) :
                 print >>self._args.outfile, line
             else :
                 print >>txdata.Handle, line
+                if "TX DESTROY" in line :
+                    txdata.Close( )
 
     def Main( self ) :
         self.ParserSetup( )
