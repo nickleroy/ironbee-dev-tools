@@ -122,6 +122,9 @@ class LineState( object ) :
         self._enable_state = EnableState( enable, enable )
         return prev
 
+    def EnableStateStack( self, index=-1 ) :
+        return self._enable_stack[index].Current
+
     def PopEnableState( self ) :
         if len(self._enable_stack) == 0 :
             raise StateStackError
@@ -233,12 +236,13 @@ class FileProcessor( object ) :
         except (BaseException) as e :
             print >>sys.stderr, 'if: Failed to eval "'+expr+'"'
             v = False
-        prev = line_state.PushEnableState( v )
+        prev = line_state.EnableState
+        line_state.PushEnableState( prev and v )
         line_state.LineEnable = False
         line_state.LineExpand = False
         if self._args.verbose >= 2 :
             e = line_state.LineEnable
-            print "  if: enable %s -> %s" % ( str(prev), str(e) )
+            print '  if(%s)=%s : enable %s -> %s' % ( expr, str(v), str(prev), str(e) )
         return True
 
     def ProcessLineElse( self, line_state ) :
@@ -250,8 +254,9 @@ class FileProcessor( object ) :
             print >>sys.stderr, 'Mismatched ${else} @ '+fp.name+':', line_state.LineNum
             print >>sys.stderr, line_state.EnableStack
             sys.exit(1)
+        stackprev = line_state.EnableStateStack()
         prev = line_state.EnableState
-        line_state.SetEnableState( not prev )
+        line_state.SetEnableState( stackprev and not prev )
         line_state.LineEnable = False
         line_state.LineExpand = False
         if self._args.verbose >= 2 :
