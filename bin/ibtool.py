@@ -132,6 +132,7 @@ class IbToolMain( object ) :
         "EtcIn"         : os.environ.get("QYLS_ETC_IN", "${Devel}/etc.in"),
         "MakeArgs"      : [ ],
         "Cmd"           : [ "${Executable}", "${Args}" ],
+        "IbInstall"     : os.environ["IB_INSTALL"],
         "IbLibDir"      : os.environ["IB_LIBDIR"],
         "IbEtc"         : "${EtcIn}/ironbee",
         "IbVersion"     : None,
@@ -275,6 +276,13 @@ class IbToolMain( object ) :
                                    action="store_false", dest="main", default=True,
                                    help="Disable running of "+self.Name )
 
+        self._parser.add_argument( "--enable-ib",
+                                   action="store_true", dest="ib_enable", default=True,
+                                   help="Disable IronBee" )
+        self._parser.add_argument( "--disable-ib",
+                                   action="store_false", dest="ib_enable",
+                                   help="Disable IronBee" )
+
         self._parser.add_argument( "--read-last",
                                    action="store_true", dest="read_last", default=True,
                                    help="Enable reading of the last file")
@@ -351,6 +359,7 @@ class IbToolMain( object ) :
             self._parser.error( "No %s binary found" % (self.NameUpper) )
 
     def SetupMakeArgs( self ) :
+        self._defs.Append("MakeArgs", "IB_ENABLE="+str(self._args.ib_enable))
         self._defs.Append("MakeArgs", "IB_VERSION="+self._defs.Lookup('IbVersion'))
         if self._args.verbose :
             self._defs.Append("MakeArgs", "DUMP=dump")
