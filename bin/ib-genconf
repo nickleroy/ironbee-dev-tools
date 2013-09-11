@@ -31,8 +31,6 @@ from ibversion import *
 
 class ProcessError( BaseException ) : pass
 
-def IsTrue( val ) : return val
-
 def CheckIbVersion( vs1, opstr, vs2 ) :
     try:
         return IbVersionComparer.CompareVersionsStr( vs1, opstr, vs2 )
@@ -175,17 +173,14 @@ class FileState( object ) :
 
 class FileProcessor( object ) :
     __ExpandRe   = re.compile( r'\$\{([^\{\}]+)\}' )
-    __SpecialRe  = re.compile( r'\$\{(include(?:.+)|if(?:.+)|else|endif|set(?:.+))\}$', re.I)
-    __IncludeRe1 = re.compile( r'\$\{include\s+"(.*)"\s*\}$', re.I)
-    __IncludeRe2 = re.compile( r'\$\{include\s+(\S+)\s*\}$', re.I)
-    __IfExprRe1  = re.compile( r'\$\{if\s+"([^"]+)"\s+(.*)\}$', re.I )
-    __IfExprRe2  = re.compile( r'\$\{if\s+(\S+)\s+(.*)\}$', re.I )
-    __IfStartRe1 = re.compile( r'\$\{if\s+"([^"]+)"\s*\}$', re.I )
-    __IfStartRe2 = re.compile( r'\$\{if\s+(\S+)\s*\}$', re.I )
-    __IfElseRe   = re.compile( r'\$\{else\s*\}$', re.I )
-    __IfEndRe    = re.compile( r'\$\{endif\s*\}$', re.I )
-    __SetRe1     = re.compile( r'\$\{set (\w+)\s+(.*?)\s*\}$', re.I)
-    __SetRe2     = re.compile( r'\$\{set (\w+)\s+"(.*)"\s*\}$', re.I)
+    __IncludeRe1 = re.compile( r'\.include\s+"(.*)"', re.I)
+    __IncludeRe2 = re.compile( r'\.include\s+(\S+)', re.I)
+    __IfStartRe1 = re.compile( r'\.if\s+"([^"]+)"', re.I )
+    __IfStartRe2 = re.compile( r'\.if\s+(\S+)', re.I )
+    __IfElseRe   = re.compile( r'\.else', re.I )
+    __IfEndRe    = re.compile( r'\.endif', re.I )
+    __DefineRe1  = re.compile( r'\.define (\w+)\s+(.*?)', re.I)
+    __DefineRe2  = re.compile( r'\.define (\w+)\s+"(.*)"', re.I)
     __RuleRe     = re.compile( r'(Rule|StreamInspect) ', re.I )
     __AutoHeader = \
         '# ${OutFile} Auto-generated @${Time} by genconf ' + \
@@ -200,18 +195,18 @@ class FileProcessor( object ) :
 
     FileState   = property( lambda self : self._fstate )
 
-    def Expand( self, line ) :
+    def Expand( self, text ) :
         n = 0
         while n < 100 :
-            m = self.__ExpandRe.search( line )
+            m = self.__ExpandRe.search( text )
             if m is None :
-                return line
+                return text
             key = m.group(1)
             try :
                 value = self._defs[key]
             except KeyError :
                 value = ""
-            line = line.replace( '${'+key+'}', value )
+            text = text.replace( '${'+key+'}', value )
         raise ExpandError
 
     def CheckReList( self, line_state, re_list ) :
@@ -225,7 +220,7 @@ class FileProcessor( object ) :
         return None
 
     def ProcessLineIf( self, line_state ) :
-        # Check for ${if "<expr>"}
+        # Check for .if "<expr>"
         m = self.CheckReList( line_state, (self.__IfStartRe1,self.__IfStartRe2) )
         if m is None :
             return False
@@ -246,12 +241,12 @@ class FileProcessor( object ) :
         return True
 
     def ProcessLineElse( self, line_state ) :
-        # Check for ${else "<expr>"}
+        # Check for .else
         m = self.CheckReList( line_state, (self.__IfElseRe,) )
         if m is None :
             return False
         if not line_state.StackSize :
-            print >>sys.stderr, 'Mismatched ${else} @ '+fp.name+':', line_state.LineNum
+            print >>sys.stderr, 'Mismatched .else @ '+fp.name+':', line_state.LineNum
             print >>sys.stderr, line_state.EnableStack
             sys.exit(1)
         stackprev = line_state.EnableStateStack()
@@ -264,12 +259,12 @@ class FileProcessor( object ) :
         return True
 
     def ProcessLineEndif( self, line_state ) :
-        # Check for ${endif "<expr>"}
+        # Check for .endif
         m = self.CheckReList( line_state, (self.__IfEndRe,) )
         if m is None :
             return False
         if not line_state.StackSize :
-            print >>sys.stderr, 'Mismatched ${endif} @ '+\
+            print >>sys.stderr, 'Mismatched .endif @ '+\
                 self.FileState.InName+':', line_state.LineNum
             print >>sys.stderr, line_state.EnableStack
             sys.exit(1)
@@ -280,25 +275,9 @@ class FileProcessor( object ) :
             print "  endif: enable %s -> %s" % ( str(prev), str(line_state.LineEnable) )
         return True
 
-    def ProcessLineIfExpr( self, line_state ) :
-        # Check for ${if "<expr>" text}
-        m = self.CheckReList( line_state, (self.__IfExprRe1,self.__IfExprRe2) )
-        if m is None :
-            return False
-        try :
-            expr = self.Expand( m.group(1) )
-            v = eval(expr)
-        except (SyntaxError, NameError) as e :
-            v = False
-        if v :
-            line_state.LineText = m.group(2)
-        elif line_state.LineEnable :
-            line_state.LineEnable = v
-        return True
-
-    def ProcessLineSet( self, line_state ) :
+    def ProcessLineDefine( self, line_state ) :
         # Check for a definition
-        m = self.CheckReList( line_state, (self.__SetRe1,self.__SetRe2) )
+        m = self.CheckReList( line_state, (self.__DefineRe1,self.__DefineRe2) )
         if m is None :
             return False
         expanded = self.Expand(m.group(2))
@@ -308,17 +287,19 @@ class FileProcessor( object ) :
         return True
 
     def ProcessLineInclude( self, line_state ) :
-        # Process includes
+        # Process .Include
         m = self.CheckReList( line_state, (self.__IncludeRe1,self.__IncludeRe2) )
         if m is None :
             return False
-        name = m.group(1)
+        line_state.LineEnable = False
+        name = self.Expand( m.group(1) )
+        if not len(name) :
+            return True
         base = os.path.dirname( self.FileState.InName )
         fpath = os.path.join( base, name )
         try :
             fp = open(fpath)
             self.ProcessFile( fp, None )
-            line_state.LineEnable = False
         except IOError as e :
             print >>sys.stderr, 'Error reading file "'+fpath+'": ', e
             sys.exit( 1 )
@@ -340,18 +321,16 @@ class FileProcessor( object ) :
                 line_state.Line = self.__AutoHeader
 
         # Check for a special line
-        if self.__SpecialRe.match( line_state.LineText ) :
+        if line_state.LineText.startswith('.') :
             if self.ProcessLineIf( line_state ) :
                 pass
             elif self.ProcessLineElse( line_state ) :
                 pass
             elif self.ProcessLineEndif( line_state ) :
                 pass
-            elif self.ProcessLineIfExpr( line_state ) :
-                pass
             elif self.ProcessLineInclude( line_state ) :
                 pass
-            elif self.ProcessLineSet( line_state ) :
+            elif self.ProcessLineDefine( line_state ) :
                 pass
             else :
                 print >>sys.stderr, 'Failed to parse special line @ '+\
