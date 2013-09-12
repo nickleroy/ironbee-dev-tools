@@ -92,7 +92,7 @@ class LineState( object ) :
 
     def GetLineFull( self ) :
         line = self._lead_white
-        if not self._enable :
+        if not self.GetLineEnable() :
             line += '#'
         line += self._line_text
         return line
@@ -166,21 +166,23 @@ class FileState( object ) :
     InFile  = property( lambda self : self._fp_in )
     InName  = property( lambda self : self._fp_in.name )
     OutFile = property( lambda self : self._fp_out )
-    OutName = property( lambda self : self._fp_in.name )
+    OutName = property( lambda self : "" if self._fp_out is None else self._fp_out.name )
     Defs    = property( lambda self : self._defs )
     BaseId  = property( lambda self : self._defs['Base'] )
 
 
 class FileProcessor( object ) :
     __ExpandRe   = re.compile( r'\$\{([^\{\}]+)\}' )
-    __IncludeRe1 = re.compile( r'\.include\s+"(.*)"', re.I)
+    __ImportRe1  = re.compile( r'\.import\s+"(.+)"', re.I)
+    __ImportRe2  = re.compile( r'\.import\s+(\S+)', re.I)
+    __IncludeRe1 = re.compile( r'\.include\s+"(.+)"', re.I)
     __IncludeRe2 = re.compile( r'\.include\s+(\S+)', re.I)
     __IfStartRe1 = re.compile( r'\.if\s+"([^"]+)"', re.I )
-    __IfStartRe2 = re.compile( r'\.if\s+(\S+)', re.I )
+    __IfStartRe2 = re.compile( r'\.if\s+(.*)', re.I )
     __IfElseRe   = re.compile( r'\.else', re.I )
     __IfEndRe    = re.compile( r'\.endif', re.I )
-    __DefineRe1  = re.compile( r'\.define (\w+)\s+(.*?)', re.I)
-    __DefineRe2  = re.compile( r'\.define (\w+)\s+"(.*)"', re.I)
+    __DefineRe1  = re.compile( r'\.define\s+(\w+)\s+(.*)', re.I)
+    __DefineRe2  = re.compile( r'\.define\s+(\w+)\s+"(.*)"', re.I)
     __RuleRe     = re.compile( r'(Rule|StreamInspect) ', re.I )
     __AutoHeader = \
         '# ${OutFile} Auto-generated @${Time} by genconf ' + \
@@ -226,18 +228,20 @@ class FileProcessor( object ) :
             return False
 
         expr = self.Expand( m.group(1) )
+        if expr == "" :
+            expr = "False"
         try :
             v = eval(expr)
         except (BaseException) as e :
             print >>sys.stderr, 'if: Failed to eval "'+expr+'"'
             v = False
         prev = line_state.EnableState
-        line_state.PushEnableState( prev and v )
+        e = prev and v
+        line_state.PushEnableState( e )
         line_state.LineEnable = False
         line_state.LineExpand = False
         if self._args.verbose >= 2 :
-            e = line_state.LineEnable
-            print '  if(%s)=%s : enable %s -> %s' % ( expr, str(v), str(prev), str(e) )
+            print '  if("%s") => %s : enable %s -> %s' % ( expr, str(v), str(prev), str(e) )
         return True
 
     def ProcessLineElse( self, line_state ) :
@@ -282,8 +286,31 @@ class FileProcessor( object ) :
             return False
         expanded = self.Expand(m.group(2))
         self._defs.Set( m.group(1), expanded )
+        if self._args.verbose >= 2 :
+            print '  defined "%s" to be "%s"' % ( m.group(1), expanded )
         line_state.LineExpand = False
         line_state.LineEnable = False
+        return True
+
+    def ProcessLineImport( self, line_state ) :
+        # Process .Import
+        m = self.CheckReList( line_state, (self.__ImportRe1,self.__ImportRe2) )
+        if m is None :
+            return False
+        line_state.LineEnable = False
+        name = self.Expand( m.group(1) )
+        if not len(name) :
+            return True
+        base = os.path.dirname( self.FileState.InName )
+        fpath = os.path.join( base, name )
+        try :
+            fp = open(fpath)
+            if self._args.verbose >= 1 :
+                print '  importing "'+fpath+'"'
+            self.ProcessFile( fp, None )
+        except IOError as e :
+            print >>sys.stderr, 'Error reading file "'+fpath+'": ', e
+            sys.exit( 1 )
         return True
 
     def ProcessLineInclude( self, line_state ) :
@@ -297,9 +324,12 @@ class FileProcessor( object ) :
             return True
         base = os.path.dirname( self.FileState.InName )
         fpath = os.path.join( base, name )
+        if self._args.verbose >= 1 :
+            print '  including "'+fpath+'" into '+ \
+                str(self.FileState.OutFile)+' "'+str(self.FileState.OutName)+'"'
         try :
             fp = open(fpath)
-            self.ProcessFile( fp, None )
+            self.ProcessFile( fp, self.FileState.OutFile )
         except IOError as e :
             print >>sys.stderr, 'Error reading file "'+fpath+'": ', e
             sys.exit( 1 )
@@ -328,6 +358,8 @@ class FileProcessor( object ) :
                 pass
             elif self.ProcessLineEndif( line_state ) :
                 pass
+            elif self.ProcessLineImport( line_state ) :
+                pass
             elif self.ProcessLineInclude( line_state ) :
                 pass
             elif self.ProcessLineDefine( line_state ) :
@@ -349,12 +381,14 @@ class FileProcessor( object ) :
                     text = line_state.LineText + ' ' + (' '.join(self._args.rule_append))
                 line_state.LineText = line
 
+        # Apply comment patterns
         for pat in self._args.uncomment_pats :
             text = line_state.LineText
             if re.match( r'\s+#', text )  and  re.search( pat, text ) :
                 text = ws + re.sub( '#\s+', '', text )
             line_state.LineText = text
 
+        # Final line processing
         text = line_state.LineText
         orig = text
         for regex,subst in self._args.patterns.items( ) :
@@ -380,17 +414,21 @@ class FileProcessor( object ) :
 
     def ProcessFile( self, fp_in, fp_out=None ) :
         assert fp_in is not None
+        if self._args.verbose >= 1:
+            print 'ProcessFile(%s, %s)' % (str(fp_in), str(fp_out))
 
-        self._fstate = self.BuildState( fp_in, fp_out )
+        fstate = self.BuildState( fp_in, fp_out )
         self._fstack.append( self.FileState )
+        self._fstate = fstate
         line_state = LineState( )
 
         for num,line in enumerate( self.FileState.InFile ) :
             lno = num + 1
             line_state.LineStart( line, lno )
             if self._args.verbose >= 2:
-                print 'Processing line %d of file "%s" "%s"' % \
-                    ( lno, self.FileState.InFile.name, line_state.LineText )
+                print 'Processing line %d of file "%s" %s "%s"' % \
+                    ( lno, self.FileState.InFile.name,
+                      line_state.LineEnable, line_state.LineText )
             line = self.ProcessLine( line_state )
             if fp_out is not None :
                 if self._args.verbose >= 3:
@@ -398,6 +436,9 @@ class FileProcessor( object ) :
                 print >>fp_out, line_state.LineFull
             line_state.LineEnd( )
         self._fstate = self._fstack.pop(-1)
+        if self._args.verbose >= 1:
+            print 'ProcessFile: Done with(%s) now(%s, %s)' % \
+                (str(fp_in), str(self.FileState.InFile), str(self.FileState.OutFile))
 
 
 class Main( object ) :
