@@ -162,7 +162,7 @@ class FileState( object ) :
         assert defs is not None
         self._fp_in  = fp_in
         self._fp_out = fp_out
-        self._defs   = copy.copy( defs )
+        self._defs = defs
     InFile  = property( lambda self : self._fp_in )
     InName  = property( lambda self : self._fp_in.name )
     OutFile = property( lambda self : self._fp_out )
@@ -189,25 +189,31 @@ class FileProcessor( object ) :
         'from ${InFile}.  DO NOT EDIT!!'
 
     def __init__( self, args, defs ) :
-        self._args   = args
-        self._defs   = defs
-        self._lstate = None
-        self._fstack = [ ]
-        self._fstate = None
+        self._args      = args
+        self._main_defs = copy.copy( defs )
+        self._lstate    = None
+        self._fstack    = [ ]
+        self._fstate    = None
 
     FileState   = property( lambda self : self._fstate )
 
     def Expand( self, text ) :
+        defs = self.FileState.Defs
         for n in range(100) :
             m = self.__ExpandRe.search( text )
             if m is None :
                 return text
             key = m.group(1)
             try :
-                value = self._defs[key]
+                value = defs[key]
             except KeyError :
                 value = ""
-            text = text.replace( '${'+key+'}', value )
+            try :
+                text = text.replace( '${'+key+'}', str(value) )
+            except TypeError :
+                print type(key), key, type(value), value
+                print defs.Str()
+                raise
         raise ExpandError
 
     def CheckReList( self, line_state, re_list ) :
@@ -284,7 +290,7 @@ class FileProcessor( object ) :
         if m is None :
             return False
         expanded = self.Expand(m.group(2))
-        self._defs.Set( m.group(1), expanded )
+        self.FileState.Defs.Set( m.group(1), expanded )
         if self._args.verbose >= 2 :
             print '  defined "%s" to be "%s"' % ( m.group(1), expanded )
         line_state.LineExpand = False
@@ -306,7 +312,7 @@ class FileProcessor( object ) :
             fp = open(fpath)
             if self._args.verbose >= 1 :
                 print '  importing "'+fpath+'"'
-            self.ProcessFile( fp, None )
+            self.ProcessFile( fp, None, False )
         except IOError as e :
             print >>sys.stderr, 'Error reading file "'+fpath+'": ', e
             sys.exit( 1 )
@@ -317,6 +323,8 @@ class FileProcessor( object ) :
         m = self.CheckReList( line_state, (self.__IncludeRe1,self.__IncludeRe2) )
         if m is None :
             return False
+        if not line_state.LineEnable :
+            return True
         line_state.LineEnable = False
         name = self.Expand( m.group(1) )
         if not len(name) :
@@ -328,7 +336,7 @@ class FileProcessor( object ) :
                 str(self.FileState.OutFile)+' "'+str(self.FileState.OutName)+'"'
         try :
             fp = open(fpath)
-            self.ProcessFile( fp, self.FileState.OutFile )
+            self.ProcessFile( fp, self.FileState.OutFile, True )
         except IOError as e :
             print >>sys.stderr, 'Error reading file "'+fpath+'": ', e
             sys.exit( 1 )
@@ -337,9 +345,9 @@ class FileProcessor( object ) :
     def ProcessLine( self, line_state ) :
 
         # Create "Line", "RID", "PRID"
-        self._defs.Set('Line', '%03d' % (line_state.LineNum) )
+        self.FileState.Defs.Set('Line', '%03d' % (line_state.LineNum) )
         ruleid = '%s/%03d' % (self.FileState.BaseId, line_state.LineNum)
-        self._defs.Set('RID', ruleid, fn = lambda d,v : d.Set('PRID', v))
+        self.FileState.Defs.Set('RID', ruleid, fn = lambda d,v : d.Set('PRID', v))
 
         # Add genconf header line
         if line_state.LineNum == 1 :
@@ -401,22 +409,28 @@ class FileProcessor( object ) :
 
         return line_state.LineFull
 
-    def BuildState( self, fp_in, fp_out ) :
+    def BuildState( self, fp_in, fp_out, defs ) :
         basename = os.path.basename( fp_in.name )
         if fp_out is not None :
-            self._defs.Set('OutFile', os.path.basename(fp_out.name))
-        self._defs.Set('InFile', basename)
-        self._defs.Set('InFilePath', fp_in.name)
+            defs.Set('OutFile', os.path.basename(fp_out.name))
+        defs.Set('InFile', basename)
+        defs.Set('InFilePath', fp_in.name)
         baseid = re.sub( r'\..+', r'', basename)
-        self._defs.Set('Base', baseid, over=False)
-        return FileState( fp_in, fp_out, self._defs )
+        defs.Set('Base', baseid, over=True)
+        return FileState( fp_in, fp_out, defs )
 
-    def ProcessFile( self, fp_in, fp_out=None ) :
+    def ProcessFile( self, fp_in, fp_out=None, copy_defs=True ) :
         assert fp_in is not None
         if self._args.verbose >= 1:
             print 'ProcessFile(%s, %s)' % (str(fp_in), str(fp_out))
 
-        fstate = self.BuildState( fp_in, fp_out )
+        parent_defs = self._main_defs if self.FileState is None else self.FileState.Defs
+        state_defs = copy.copy( parent_defs ) if copy_defs else parent_defs
+
+        fstate = self.BuildState( fp_in, fp_out, state_defs )
+        if self._args.verbose >= 2:
+            print fstate.Defs.Str()
+
         self._fstack.append( self.FileState )
         self._fstate = fstate
         line_state = LineState( )
@@ -435,14 +449,14 @@ class FileProcessor( object ) :
                 print >>fp_out, line_state.LineFull
             line_state.LineEnd( )
         self._fstate = self._fstack.pop(-1)
-        if self._args.verbose >= 1:
+        if self._args.verbose >= 1 and self._fstate is not None:
             print 'ProcessFile: Done with(%s) now(%s, %s)' % \
                 (str(fp_in), str(self.FileState.InFile), str(self.FileState.OutFile))
 
 
 class Main( object ) :
     def __init__( self ) :
-        self._defs = IbDict( )
+        self._main_defs = IbDict( )
 
     def SetupParser( self ) :
         self._parser = argparse.ArgumentParser(
@@ -537,16 +551,16 @@ class Main( object ) :
         for name in self._args.env_vars :
             if name not in os.environ :
                 self._parser.error( '"%s" not in environment!'%(name) )
-            self._defs.Set( name, os.environ[name] )
+            self._main_defs.Set( name, os.environ[name] )
         for name,value in self._args.defs :
-            self._defs.Set( name, value )
+            self._main_defs.Set( name, value )
 
     Execute = property( lambda self : self._args.verbose )
     Verbose = property( lambda self : self._args.verbose )
     Quiet   = property( lambda self : self._args.verbose )
 
     def FindIbVersion( self ) :
-        if 'IB_VERSION' in self._defs is not None  and  self._args.libpath is None :
+        if 'IB_VERSION' in self._main_defs is not None  and  self._args.libpath is None :
             print >>sys.stderr, 'Warning: No IronBee version available'
         path = IbVersionReader.FindFile( self._args.libpath )
         if path is None :
@@ -557,32 +571,33 @@ class Main( object ) :
         if version is None :
             print >>sys.stderr, 'Warning: Unable to parse version in "'+str(path)+'"'
             return
-        self._defs['IB_VERSION'] = version.Format()
+        self._main_defs['IB_VERSION'] = version.Format()
 
     def SetupDefs( self ) :
         pid = ""
         for name in netifaces.interfaces() :
             try :
                 ip = netifaces.ifaddresses(name)[netifaces.AF_INET][0]['addr']
-                self._defs.Set("iface:"+name, ip, over=False)
+                self._main_defs.Set("iface:"+name, ip, over=False)
                 if ip.startswith("192.168") :
-                    self._defs.Set("iface:private", ip, over=False)
+                    self._main_defs.Set("iface:private", ip, over=False)
                 elif name.startswith("eth") :
-                    self._defs.Set("iface:public", ip, over=False)
+                    self._main_defs.Set("iface:public", ip, over=False)
                 if name.startswith("eth") :
-                    self._defs.Set("iface:eth", ip, over=False)
+                    self._main_defs.Set("iface:eth", ip, over=False)
             except KeyError :
                 continue
-        self._defs.Set("HostName", socket.gethostname(), over=False)
-        self._defs.Set("Time", time.asctime(), over=False)
+        self._main_defs.Set("HostName", socket.gethostname(), over=False)
+        self._main_defs.Set("Time", time.asctime(), over=False)
         self.FindIbVersion( )
 
     def ProcessFile( self ) :
         if not self._args.quiet :
             print "Generating", self._args.outfile.name, "from", self._args.infile.name
-        processor = FileProcessor( self._args, self._defs )
+        processor = FileProcessor( self._args, self._main_defs )
         processor.ProcessFile( self._args.infile,
-                               self._args.outfile if self._args.write else None )
+                               self._args.outfile if self._args.write else None,
+                               True)
         
     def Main( self ) :
         self.SetupParser( )
