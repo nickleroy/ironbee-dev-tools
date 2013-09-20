@@ -198,8 +198,7 @@ class FileProcessor( object ) :
     FileState   = property( lambda self : self._fstate )
 
     def Expand( self, text ) :
-        n = 0
-        while n < 100 :
+        for n in range(100) :
             m = self.__ExpandRe.search( text )
             if m is None :
                 return text
