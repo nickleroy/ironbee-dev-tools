@@ -19,6 +19,7 @@ import re
 import os
 import sys
 import copy
+import pprint
 
 class IbDict( dict ):
     """
@@ -38,6 +39,9 @@ class IbDict( dict ):
         def __str__( self ) :
             return str(self._value)
 
+        def __repr__( self ) :
+            return str(self._value)
+
     def Set( self, k, v, fn=None, over=True ) :
         if over == False and k in self :
             return
@@ -49,6 +53,11 @@ class IbDict( dict ):
     def __getitem__(self, k):
         v = dict.__getitem__(self, k)
         return v.Get( self )
+
+    def Str( self ) :
+        pp = pprint.PrettyPrinter(indent=2)
+        return pp.pformat( self )
+
 
 class IbExpander( object ) :
     def __init__( self, defs ) :
