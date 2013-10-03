@@ -137,6 +137,9 @@ class _Main( object ) :
         self._parser.add_argument( "--server-port", "-p",
                                    action="store", dest="port", type=int, default=8180,
                                    help="Specify server port" )
+        self._parser.add_argument( "--no-connect", "--nc",
+                                   action="store_false", dest="connect", default=True,
+                                   help="Don't connect to the server" )
         self._parser.add_argument( "--timeout", "-t",
                                    action="store", dest="timeout", type=float, default=5,
                                    help="Specify timeout" )
@@ -161,6 +164,8 @@ class _Main( object ) :
                                 (self_args.server) )
 
     def RunNc( self ) :
+        if not self._args.connect :
+            return
         cmd = [ "nc" ]
         if self._args.timeout is not None :
             cmd += [ "-w", str(self._args.timeout) ]
