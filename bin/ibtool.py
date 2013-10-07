@@ -171,8 +171,7 @@ class IbToolMain( object ) :
                 namespace.require_core = True
                 if values[0] != '-' :
                     namespace.defs['CoreFile'] = values[0]
-        self._parser.add_argument( "--core",
-                                   action=CoreAction, nargs=1,
+        self._parser.add_argument( "--core", action=CoreAction, nargs=1,
                                    help="Specify core file or \"-\" for last" )
 
         self._parser.add_argument( "--default",
@@ -199,23 +198,17 @@ class IbToolMain( object ) :
         class IbAction(argparse.Action):
             def __call__(self, parser, namespace, values, option_string=None):
                 if option_string == "--ib-config" :
-                    del( parser._main.Defs['PreCmds']['IB'] )
-                    namespace.defs["IbEtc"] = None
-                    namespace.defs["IbConfig"] = values[0]
-                    print values[0]
+                    namespace.defs['IbEtc'] = None
+                    namespace.defs['IbConfig'] = values[0]
                 elif len(values) == 0 :
-                    namespace.defs["IbEtc"] = parser._main.Defs.Lookup("IbRnsEtc")
+                    namespace.defs['IbEtc'] = parser._main.Defs.Lookup("IbRnsEtc")
                 else :
-                    namespace.defs["IbEtc"] = values[0]
-        self._parser.add_argument( "--rns",
-                                   action=IbAction, nargs=0,
+                    namespace.defs['IbEtc'] = values[0]
+        self._parser.add_argument( "--rns", action=IbAction, nargs=0,
                                    help="Use the RNS IronBee etc")
-        self._parser.add_argument( "--ib-etc",
-                                   action="store", dest="ironbee_etc", nargs=1,
+        self._parser.add_argument( "--ib-etc", action="store", dest="ironbee_etc", nargs=1,
                                    help="Specify ironbee etc source directory" )
-
-        self._parser.add_argument( "--ib-config",
-                                   action=IbAction, nargs=1,
+        self._parser.add_argument( "--ib-config", action=IbAction, nargs=1,
                                    help="Specify ironbee configuration" )
         
         def LogLevels( levels ) :
@@ -286,11 +279,18 @@ class IbToolMain( object ) :
                                    action="store_false", dest="main", default=True,
                                    help="Disable running of "+self.Name )
 
-        self._parser.add_argument( "--enable-ib",
-                                   action="store_true", dest="ib_enable", default=True,
+        self._parser.set_defaults( ib_enable=True )
+        class IbEnableAction(argparse.Action):
+            def __call__(self, parser, namespace, values, option_string=None):
+                if 'enable' in option_string :
+                    namespace.defs['IbEtc'] = '${EtcIn}/ironbee' # Restore default
+                    namespace.ib_enable = True
+                else :
+                    namespace.defs['IbEtc'] = None
+                    namespace.ib_enable = False
+        self._parser.add_argument( "--enable-ib", action=IbEnableAction, nargs=0,
                                    help="Disable IronBee" )
-        self._parser.add_argument( "--disable-ib",
-                                   action="store_false", dest="ib_enable",
+        self._parser.add_argument( "--disable-ib", action=IbEnableAction, nargs=0,
                                    help="Disable IronBee" )
 
         self._parser.add_argument( "--read-last",
@@ -369,6 +369,8 @@ class IbToolMain( object ) :
             self._parser.error( "No %s binary found" % (self.NameUpper) )
 
     def SetupMakeArgs( self ) :
+        if self._defs.Lookup('IbEtc') is None :
+            del(self._defs['PreCmds']['IB'])
         self._defs.Append("MakeArgs", "IB_ENABLE="+str(self._args.ib_enable))
         self._defs.Append("MakeArgs", "IB_VERSION="+self._defs.Lookup('IbVersion'))
         if self._defs.Lookup('IbConfig') != None :
