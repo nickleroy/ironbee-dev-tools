@@ -24,6 +24,7 @@ class Main( IbToolMain ) :
     _httpd_defs = {
         "FullName"      : "Apache HTTPd",
         "Name"          : "HTTPd",
+        "Short"         : "httpd",
         "HttpdVer"      : os.environ["HTTPD_VERSION"],
         "HttpdDir"      : os.environ["HTTPD_ROOT"],
         "HttpdLogDir"   : "${BaseLogDir}/httpd",

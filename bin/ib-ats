@@ -24,6 +24,7 @@ class Main( IbToolMain ) :
     _ats_defs = {
         "FullName"    : "Apache Traffic Server",
         "Name"        : "ATS",
+        "Short"       : "ts",
         "AtsVer"      : os.environ["ATS_VERSION"],
         "AtsDir"      : os.environ["ATS_ROOT"],
         "AtsVar"      : "${AtsDir}/var",

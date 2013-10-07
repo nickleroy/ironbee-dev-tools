@@ -135,6 +135,7 @@ class IbToolMain( object ) :
         "IbInstall"     : os.environ["IB_INSTALL"],
         "IbLibDir"      : os.environ["IB_LIBDIR"],
         "IbEtc"         : "${EtcIn}/ironbee",
+        "IbConfig"      : "${IbEtc}/${Short}.conf",
         "IbVersion"     : None,
         "IbRnsEtc"      : "${EtcIn}/rns-ironbee",
         "PreCmds"       : { "IB"  : ["make", "-C", "${IbEtc}", "${MakeArgs}"], },
@@ -197,17 +198,26 @@ class IbToolMain( object ) :
 
         class IbAction(argparse.Action):
             def __call__(self, parser, namespace, values, option_string=None):
-                if len(values) == 0 :
+                if option_string == "--ib-config" :
+                    del( parser._main.Defs['PreCmds']['IB'] )
+                    namespace.defs["IbEtc"] = None
+                    namespace.defs["IbConfig"] = values[0]
+                    print values[0]
+                elif len(values) == 0 :
                     namespace.defs["IbEtc"] = parser._main.Defs.Lookup("IbRnsEtc")
                 else :
                     namespace.defs["IbEtc"] = values[0]
         self._parser.add_argument( "--rns",
                                    action=IbAction, nargs=0,
                                    help="Use the RNS IronBee etc")
-        self._parser.add_argument( "--ib",
-                                   action="store", dest="ironbee", nargs=1,
+        self._parser.add_argument( "--ib-etc",
+                                   action="store", dest="ironbee_etc", nargs=1,
                                    help="Specify ironbee etc source directory" )
 
+        self._parser.add_argument( "--ib-config",
+                                   action=IbAction, nargs=1,
+                                   help="Specify ironbee configuration" )
+        
         def LogLevels( levels ) :
             count = len(levels)
             lower = [ l.lower() for l in log_levels ]
@@ -361,8 +371,12 @@ class IbToolMain( object ) :
     def SetupMakeArgs( self ) :
         self._defs.Append("MakeArgs", "IB_ENABLE="+str(self._args.ib_enable))
         self._defs.Append("MakeArgs", "IB_VERSION="+self._defs.Lookup('IbVersion'))
+        if self._defs.Lookup('IbConfig') != None :
+            self._defs.Append("MakeArgs", "IB_CONFIG="+self._defs.Lookup('IbConfig'))
         if self._args.verbose :
             self._defs.Append("MakeArgs", "DUMP=dump")
+            verbose = [ '-v' for n in range(self._args.verbose) ]
+            self._defs.Append("MakeArgs", "VERBOSE="+' '.join(verbose))
         if self._args.force_make :
             self._defs.Append("MakeArgs", "-B")
         if self._args.log_level is not None :

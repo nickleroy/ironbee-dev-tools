@@ -24,6 +24,7 @@ class Main( IbToolMain ) :
     _nginx_defs = {
         "FullName"    : "Nginx",
         "Name"        : "Nginx",
+        "Short"       : "nginx",
         "NginxVer"    : os.environ["NGINX_VERSION"],
         "NginxDir"    : os.environ["NGINX_ROOT"],
         "NginxVar"    : "${NginxDir}/var",
