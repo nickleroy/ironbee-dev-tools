@@ -289,6 +289,8 @@ class FileProcessor( object ) :
         m = self.CheckReList( line_state, (self.__DefineRe1,self.__DefineRe2) )
         if m is None :
             return False
+        if not line_state.LineEnable :
+            return True
         expanded = self.Expand(m.group(2))
         self.FileState.Defs.Set( m.group(1), expanded )
         if self._args.verbose >= 2 :
@@ -302,6 +304,8 @@ class FileProcessor( object ) :
         m = self.CheckReList( line_state, (self.__ImportRe1,self.__ImportRe2) )
         if m is None :
             return False
+        if not line_state.LineEnable :
+            return True
         line_state.LineEnable = False
         name = self.Expand( m.group(1) )
         if not len(name) :
