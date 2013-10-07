@@ -67,6 +67,7 @@ class LineState( object ) :
         self._line_text = None
         self._lead_white = None
         self._original = None
+        self._suffix = [ ]
 
     def LineStart( self, line, line_num ) :
         self.LineEnable = self._enable_state.Current
@@ -75,6 +76,7 @@ class LineState( object ) :
         self._lead_white = self.__WsRe.match( line ).group(1)
         self._line_text = line.strip()
         self._original = line
+        self._suffix = [ ]
 
     def LineEnd( self ) :
         self._line_text = None
@@ -83,6 +85,7 @@ class LineState( object ) :
 
     def RestoreLine( self ) :
         self.SetLine( self.Original )
+        self._suffix = [ ]
 
     def GetLineText( self ) :
         return self._line_text
@@ -90,11 +93,18 @@ class LineState( object ) :
     def SetLineText( self, line_text ) :
         self._line_text = line_text.strip()
 
+    def GetSuffix( self ) :
+        return self._suffix
+
+    def AddSuffix( self, text ) :
+        self._suffix.append( text )
+
     def GetLineFull( self ) :
         line = self._lead_white
         if not self.GetLineEnable() :
             line += '#'
-        line += self._line_text
+            line += self._line_text
+            line += " " + (" ".join(self._suffix))
         return line
 
     def GetLineEnable( self ) :
@@ -247,6 +257,7 @@ class FileProcessor( object ) :
         line_state.LineExpand = False
         if self._args.verbose >= 2 :
             print '  if("%s") => %s : enable %s -> %s' % ( expr, str(v), str(prev), str(e) )
+            line_state.AddSuffix( '['+str(e)+']' )
         return True
 
     def ProcessLineElse( self, line_state ) :
@@ -265,6 +276,7 @@ class FileProcessor( object ) :
         line_state.LineExpand = False
         if self._args.verbose >= 2 :
             print "  else: enable %s -> %s" % ( str(prev), str(line_state.LineEnable) )
+            line_state.AddSuffix( '['+str(line_state.LineEnable)+']' )
         return True
 
     def ProcessLineEndif( self, line_state ) :
@@ -281,7 +293,8 @@ class FileProcessor( object ) :
         line_state.LineEnable = False
         line_state.LineExpand = False
         if self._args.verbose >= 2 :
-            print "  endif: enable %s -> %s" % ( str(prev), str(line_state.LineEnable) )
+            print "  endif: enable %s -> %s" % ( str(prev), str(prev) )
+            line_state.AddSuffix( '['+str(prev)+']' )
         return True
 
     def ProcessLineDefine( self, line_state ) :
@@ -450,7 +463,12 @@ class FileProcessor( object ) :
             if fp_out is not None :
                 if self._args.verbose >= 3:
                     print '  => "%s"' % ( line_state.LineFull )
-                print >>fp_out, line_state.LineFull
+
+                print line_state.LineEnable, self._args.verbose, '"'+line_state.LineFull[:40]+'"'
+                if line_state.LineEnable or self._args.verbose > 1 :
+                    print >>fp_out, line_state.LineFull
+                else :
+                    print >>fp_out, ""
             line_state.LineEnd( )
         self._fstate = self._fstack.pop(-1)
         if self._args.verbose >= 1 and self._fstate is not None:
