@@ -134,11 +134,12 @@ class IbToolMain( object ) :
         "Cmd"           : [ "${Executable}", "${Args}" ],
         "IbInstall"     : os.environ["IB_INSTALL"],
         "IbLibDir"      : os.environ["IB_LIBDIR"],
-        "IbEtc"         : "${EtcIn}/ironbee",
+        "IbEtc"         : "${Etc}/ironbee",
+        "IbEtcIn"       : "${EtcIn}/ironbee",
         "IbConfig"      : "${IbEtc}/${Short}.conf",
         "IbVersion"     : None,
         "IbRnsEtc"      : "${EtcIn}/rns-ironbee",
-        "PreCmds"       : { "IB"  : ["make", "-C", "${IbEtc}", "${MakeArgs}"], },
+        "PreCmds"       : { "IB"  : ["make", "-C", "${IbEtcIn}", "${MakeArgs}"], },
         "LastFile"      : '.ib-${NameLower}.last',
         "LuaDir"        : os.path.join("${IbLibDir}", "lua"),
         "LuaPath"       : ";".join([s+"/?.lua" for s in
@@ -373,8 +374,8 @@ class IbToolMain( object ) :
             del(self._defs['PreCmds']['IB'])
         self._defs.Append("MakeArgs", "IB_ENABLE="+str(self._args.ib_enable))
         self._defs.Append("MakeArgs", "IB_VERSION="+self._defs.Lookup('IbVersion'))
-        if self._defs.Lookup('IbConfig') != None :
-            self._defs.Append("MakeArgs", "IB_CONFIG="+self._defs.Lookup('IbConfig'))
+        self._defs.Append("MakeArgs", "IB_CONFIG="+self._defs.Lookup('IbConfig'))
+        self._defs.Append("MakeArgs", "LOG_DIR="+self._defs.Lookup('LogDir'))
         if self._args.verbose :
             self._defs.Append("MakeArgs", "DUMP=dump")
             verbose = [ '-v' for n in range(self._args.verbose) ]
@@ -483,6 +484,7 @@ class IbToolMain( object ) :
             status = subprocess.call( cmd )
             if status :
                 print "Exit status is", status
+                sys.exit(status)
 
     def RunProgram( self ) :
         tmp = [ ]
