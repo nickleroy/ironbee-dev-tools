@@ -138,7 +138,8 @@ class IbToolMain( object ) :
         "IbEtcIn"       : "${EtcIn}/ironbee",
         "IbConfig"      : "${IbEtc}/${Short}.conf",
         "IbVersion"     : None,
-        "IbRnsEtc"      : "${EtcIn}/rns-ironbee",
+        "IbRnsEtc"      : "${Etc}/rns-ironbee",
+        "IbRnsEtcIn"    : "${EtcIn}/rns-ironbee",
         "PreCmds"       : { "IB"  : ["make", "-C", "${IbEtcIn}", "${MakeArgs}"], },
         "LastFile"      : '.ib-${NameLower}.last',
         "LuaDir"        : os.path.join("${IbLibDir}", "lua"),
@@ -202,9 +203,9 @@ class IbToolMain( object ) :
                     namespace.defs['IbEtc'] = None
                     namespace.defs['IbConfig'] = values[0]
                 elif len(values) == 0 :
-                    namespace.defs['IbEtc'] = parser._main.Defs.Lookup("IbRnsEtc")
+                    namespace.defs['IbEtcIn'] = parser._main.Defs.Lookup("IbRnsEtcIn")
                 else :
-                    namespace.defs['IbEtc'] = values[0]
+                    namespace.defs['IbEtcIn'] = values[0]
         self._parser.add_argument( "--rns", action=IbAction, nargs=0,
                                    help="Use the RNS IronBee etc")
         self._parser.add_argument( "--ib-etc", action="store", dest="ironbee_etc", nargs=1,
