@@ -273,11 +273,11 @@ class IbToolMain( object ) :
                                    action="store_true", dest="clean", default=False,
                                    help="Clean log files before starting %s" % (self.Name) )
 
-        self._parser.add_argument( "--disable-precmds",
+        self._parser.add_argument( "--disable-precmds", "--dp",
                                    action="store_false", dest="precmds", default=True,
                                    help="Disable running of pre-commands")
 
-        self._parser.add_argument( "--disable-main",
+        self._parser.add_argument( "--disable-main", "--dm", "--no-main",
                                    action="store_false", dest="main", default=True,
                                    help="Disable running of "+self.Name )
 
@@ -403,7 +403,7 @@ class IbToolMain( object ) :
         self.SetupMakeArgs( )
 
         if self._args.clean :
-            self._defs["PreCmds"]["Clean"] = [ "/bin/rm", "${LogFiles}" ]
+            self._defs["PreCmds"]["Clean"] = [ "/bin/rm", "-fr", "${LogFiles}" ]
 
         if self._args.read_last :
             self.ReadLastFile( )
