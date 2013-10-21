@@ -74,6 +74,8 @@ class IbExpander( object ) :
         if self._verbose >= 2 :
             print "Expanding:", args
             print "  using:", self._defs
+        if type(args) == tuple :
+            args = list(args)
         while True :
             initial = copy.copy(args)
             for n,arg in enumerate(args) :
