@@ -38,8 +38,7 @@ class Main( IbToolMain ) :
 
     def __init__( self ) :
         IbToolMain.__init__( self, self._nginx_defs )
-        self.Defs["PreCmds"]["NGINX"] = ["make", "-C", "${NginxEtcIn}", "${MakeArgs}"]
-        self.Defs["PreCmds"]["Clean"] = [ "/bin/rm", "${LogFiles}" ]
+        self.AddPrePair( 'Nginx', '${NginxEtcIn}' )
 
 main = Main( )
 main.Main( )

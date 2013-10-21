@@ -110,6 +110,57 @@ class _IbParser( argparse.ArgumentParser ) :
     def SetMain( self, main ) :
         self._main = main
 
+class _CommandItem( object ) :
+    def __init__( self, name, priority, argv, enabled=True ) :
+        assert type(priority) == int
+        assert type(argv) in (list, tuple)
+        self._name = name
+        self._priority = priority
+        self._argv = tuple(argv)
+        self._enabled = enabled
+        self._is_make = len(argv)  and  'make' in argv[0]
+        self._is_clean = self.IsMake and 'clean' in argv
+
+    def _SetEnabled( self, enabled ) :
+        self._enabled = enabled
+    Name     = property( lambda self : self._name )
+    Priority = property( lambda self : self._priority )
+    Argv     = property( lambda self : self._argv )
+    Enabled  = property( lambda self : self._enabled, _SetEnabled )
+    IsMake   = property( lambda self : self._is_make )
+    IsClean  = property( lambda self : self._is_clean )
+
+class _CommandList( object ) :
+    def __init__( self ) :
+        self._commands = dict()
+
+    def AddCommand( self, command ) :
+        assert isinstance(command, _CommandItem)
+        self._commands[command.Name] = command
+
+    def Create( self, name, priority, command, enabled=True ) :
+        new = _CommandItem( name, priority, command, enabled )
+        self._commands[new.Name] = new
+
+    def Get( self, name ) :
+        return self._commands.get( name, None )
+
+    def SetEnabled( self, name, enabled ) :
+        self._commands[name].Enabled = enabled
+
+    def GetSortedItems( self, fn=None ) :
+        for name in sorted( self._commands.keys(), key = lambda n : self._commands[n].Priority ) :
+            item = self._commands[name]
+            if fn is None  or  fn(item) :
+                yield item
+        return
+
+    def GetSortedCommands( self, fn=None ) :
+        for item in self.GetSortedItems( self, fn=fn ) :
+            yield item.Command
+        return
+
+
 class IbToolMain( object ) :
     _tools = {
         "none"     : _Tool( "none" ),
@@ -140,7 +191,6 @@ class IbToolMain( object ) :
         "IbVersion"     : None,
         "IbRnsEtc"      : "${Etc}/rns-ironbee",
         "IbRnsEtcIn"    : "${EtcIn}/rns-ironbee",
-        "PreCmds"       : { "IB"  : ["make", "-C", "${IbEtcIn}", "${MakeArgs}"], },
         "LastFile"      : '.ib-${NameLower}.last',
         "LuaDir"        : os.path.join("${IbLibDir}", "lua"),
         "LuaPath"       : ";".join([s+"/?.lua" for s in
@@ -154,10 +204,19 @@ class IbToolMain( object ) :
         self._defs.Set( "NameLower", name.lower() )
         self._defs.Set( "NameUpper", name.upper() )
 
-    FullName  = property(lambda self : self._defs.Lookup("FullName"))
-    Name      = property(lambda self : self._defs.Lookup("Name"))
-    NameLower = property(lambda self : self._defs.Lookup("NameLower"))
-    NameUpper = property(lambda self : self._defs.Lookup("NameUpper"))
+        cmds = _CommandList( )
+        self._defs['PreCmds'] = cmds
+        self.AddPrePair( 'Ib', '${IbEtcIn}' )
+        cmds.Create('ClearLogs', 20, ('/bin/rm', '-fr', '${LogFiles}'))
+        cmds = _CommandList( )
+        self._defs['PostCmds'] = cmds
+
+    FullName     = property(lambda self : self._defs.Lookup("FullName"))
+    Name         = property(lambda self : self._defs.Lookup("Name"))
+    NameLower    = property(lambda self : self._defs.Lookup("NameLower"))
+    NameUpper    = property(lambda self : self._defs.Lookup("NameUpper"))
+    PreCommands  = property(lambda self : self._defs.Get("PreCmds"))
+    PostCommands = property(lambda self : self._defs.Get("PostCmds"))
 
     def ParserSetup( self ) :
         self._parser = _IbParser( description="Run "+self.FullName+" with IronBee",
@@ -253,13 +312,14 @@ class IbToolMain( object ) :
                                    choices=LogLevels(rule_debug_levels),
                                    help='Specify IronBee rule debug level')
 
+        self._parser.add_argument( "--clean",
+                                   action="store_true", dest="clean", default=False,
+                                   help="make clean in etc directories")
+
         self._parser.set_defaults( targets=("default",) )
-        self._parser.add_argument( "--fresh",
-                                   action="store_const", dest="targets", const=("fresh",),
-                                   help="make fresh in etc directories")
         self._parser.add_argument( "--targets",
                                    action="store", dest="targets", nargs="+",
-                                   help="make fresh in etc directories")
+                                   help="make clean in etc directories")
 
         self._parser.add_argument( "--out", "-o",
                                    dest="output", type=argparse.FileType('w'), default=None,
@@ -269,9 +329,9 @@ class IbToolMain( object ) :
                                    const="${DefaultOut}",
                                    help="Use default stdout file" )
 
-        self._parser.add_argument( "--clean", "-c",
-                                   action="store_true", dest="clean", default=False,
-                                   help="Clean log files before starting %s" % (self.Name) )
+        self._parser.add_argument( "--clear-logs", "-c",
+                                   action="store_true", dest="clear_logs", default=False,
+                                   help="Clear log files before starting %s" % (self.Name) )
 
         self._parser.add_argument( "--disable-precmds", "--dp",
                                    action="store_false", dest="precmds", default=True,
@@ -372,7 +432,7 @@ class IbToolMain( object ) :
 
     def SetupMakeArgs( self ) :
         if self._defs.Lookup('IbEtc') is None :
-            del(self._defs['PreCmds']['IB'])
+            self.PreCommands.SetEnabled('MakeIb', False)
         self._defs.Append("MakeArgs", "IB_ENABLE="+str(self._args.ib_enable))
         self._defs.Append("MakeArgs", "IB_VERSION="+self._defs.Lookup('IbVersion'))
         self._defs.Append("MakeArgs", "IB_CONFIG="+self._defs.Lookup('IbConfig'))
@@ -390,6 +450,13 @@ class IbToolMain( object ) :
         if self._args.rule_debug_level is not None :
             self._defs.Append("MakeArgs", "RULE_DEBUG_LEVEL="+self._args.rule_debug_level)
         self._defs.Append("MakeArgs", self._args.targets)
+        #self._defs.Append("MakeArgs", '-j')
+        #self._defs.Append("MakeArgs", '4')
+
+    def AddPrePair( self, name, dirpath ) :
+        base_cmd = ('make', '-C', dirpath, '${MakeArgs}')
+        self.PreCommands.Create( 'Clean'+name, 10, base_cmd+('clean',) )
+        self.PreCommands.Create( 'Make'+name,  11, base_cmd )
 
     def PostParse( self ) :
         for name,value in self._args.defs.items() :
@@ -402,8 +469,9 @@ class IbToolMain( object ) :
         self.FindExecutable( )
         self.SetupMakeArgs( )
 
-        if self._args.clean :
-            self._defs["PreCmds"]["Clean"] = [ "/bin/rm", "-fr", "${LogFiles}" ]
+        for pcmd in self.PreCommands.GetSortedItems( fn=lambda pc:pc.IsClean) :
+            pcmd.Enabled = self._args.clean
+        self.PreCommands.SetEnabled( 'ClearLogs', self._args.clear_logs )
 
         if self._args.read_last :
             self.ReadLastFile( )
@@ -469,21 +537,20 @@ class IbToolMain( object ) :
     def RunPre( self ) :
         if not self._args.precmds :
             return
-        cmds = self._defs.Get("PreCmds")
-        for name, cmd in cmds.items() :
-            cmd = self.GlobCmd(self._defs.ExpandList(cmd))
-            if len(cmd) == 0 :
+        for cmd in self.PreCommands.GetSortedItems( fn=lambda pc : pc.Enabled ) :
+            argv = self.GlobCmd( self._defs.ExpandList(cmd.Argv) )
+            if len(argv) == 0 :
                 continue
             if not self._args.execute :
-                if cmd[0] == "make" :
-                    cmd [1:1] = ( "-n", )
+                if cmd.IsMake  and  self._args.verbose :
+                    argv[1:1] = ( "-n", )
                 else :
-                    print "Not running:", cmd
+                    print "Not running:", argv
                     continue
             if self._args.verbose :
-                print "%s: Executing \"%s\"" % (name, str(cmd))
-            status = subprocess.call( cmd )
-            if status :
+                print "%s: Executing \"%s\"" % (cmd.Name, str(argv))
+            status = subprocess.call( argv )
+            if status  and  not cmd.IsClean :
                 print "Exit status is", status
                 sys.exit(status)
 

@@ -39,8 +39,7 @@ class Main( IbToolMain ) :
 
     def __init__( self ) :
         IbToolMain.__init__( self, self._ats_defs )
-        self.Defs["PreCmds"]["ATS"] = ["make", "-C", "${AtsEtcIn}", "${MakeArgs}"]
-        self.Defs["PreCmds"]["Clean"] = [ "/bin/rm", "${LogFiles}" ]
+        self.AddPrePair( 'ATS', '${AtsEtcIn}' )
 
 main = Main( )
 main.Main( )

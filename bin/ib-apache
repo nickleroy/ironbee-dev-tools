@@ -38,9 +38,8 @@ class Main( IbToolMain ) :
 
     def __init__( self ) :
         IbToolMain.__init__( self, self._httpd_defs )
-        self.Defs["PreCmds"]["HTTPd"] = ["make", "-C", "${HttpdEtcIn}", "${MakeArgs}"]
-        self.Defs["PreCmds"]["Clean"] = [ "/bin/rm", "${LogFiles}" ]
-        self.GetTool( "gdb" ).AppendProgArgs( ("-X",) )
+        self.AddPrePair( 'HTTPd', '${HttpdEtcIn}' )
+        self.GetTool("gdb").AppendProgArgs( ("-X",) )
 
 main = Main( )
 main.Main( )
