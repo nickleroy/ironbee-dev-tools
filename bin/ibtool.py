@@ -341,6 +341,22 @@ class IbToolMain( object ) :
                                    action="store_false", dest="main", default=True,
                                    help="Disable running of "+self.Name )
 
+        self._parser.add_argument( "--interface", "--if",
+                                   action="store", dest="interface", default="NET",
+                                   help="Specify IF_xxx interface to use" )
+        self._parser.add_argument( "--net",
+                                   action="store_const", dest="interface", const="NET",
+                                   help="Use IF_NET (network) interface" )
+        self._parser.add_argument( "--pub",
+                                   action="store_const", dest="interface", const="PUB",
+                                   help="Use IF_PUB (public) interface" )
+        self._parser.add_argument( "--private",
+                                   action="store_const", dest="interface", const="PRIV",
+                                   help="Use IF_PRIV (private) interface" )
+        self._parser.add_argument( "--loopback",
+                                   action="store_const", dest="interface", const="LOOP",
+                                   help="Use IF_LOOP (loopback) interface" )
+
         self._parser.set_defaults( ib_enable=True )
         class IbEnableAction(argparse.Action):
             def __call__(self, parser, namespace, values, option_string=None):
@@ -437,6 +453,12 @@ class IbToolMain( object ) :
         self._defs.Append("MakeArgs", "IB_VERSION="+self._defs.Lookup('IbVersion'))
         self._defs.Append("MakeArgs", "IB_CONFIG="+self._defs.Lookup('IbConfig'))
         self._defs.Append("MakeArgs", "LOG_DIR="+self._defs.Lookup('LogDir'))
+
+        for post in ( "HOST", "DOMAIN", "FQDN", "IPADDR", "FULL" ) :
+            envname = "IF_"+self._args.interface+"_"+post
+            if envname in os.environ :
+                self._defs.Append("MakeArgs", "QYLS_"+post+"="+os.environ[envname])
+
         if self._args.verbose :
             self._defs.Append("MakeArgs", "DUMP=dump")
             verbose = [ '-v' for n in range(self._args.verbose) ]
@@ -465,7 +487,9 @@ class IbToolMain( object ) :
         self._tool = self._tools[self._args.tool]
         self._tool.SetVerbose( self._args.verbose )
         self._defs.SetDict( self._tool.Defs, over=False )
-
+        if "IF_"+self._args.interface+"_HOST" not in os.environ :
+            self._parser.error( 'Invalid interface "'+self._args.interface+'" specified' )
+            
         self.FindExecutable( )
         self.SetupMakeArgs( )
 
