@@ -1,0 +1,164 @@
+#! /usr/bin/env python
+# ****************************************************************************
+# Licensed to Qualys, Inc. (QUALYS) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# QUALYS licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ****************************************************************************
+import os
+import sys
+import re
+import argparse
+
+class Flag( object ) :
+    def __init__( self, name, vstr, line, text, flagset ) :
+        self._name  = name
+        self._vstr  = vstr
+        self._line  = line
+        self._text  = text
+        while True :
+            m = re.search( r'(\w+)', vstr )
+            if m is not None and m.group(1) in flagset :
+                vstr = vstr.replace( m.group(1), flagset[m.group(1)].ValStr)
+            else :
+                break
+        try :
+            tmp = vstr.replace('1ULL','1').replace('1UL','1')
+            self._value = eval( tmp )
+        except SyntaxError as e :
+            print "Failed to eval '%s'" % ( tmp )
+
+    Name   = property( lambda self : self._name )
+    ValStr = property( lambda self : self._vstr )
+    Value  = property( lambda self : self._value )
+    Line   = property( lambda self : self._line )
+    Text   = property( lambda self : self._text )
+    def IsSet( self, flagbit ) :
+        return True if (flagbit & self._value) else False
+
+class FlagSet( object ) :
+    def __init__( self, name, path, first, prefix ) :
+        self._name   = name
+        self._path   = path
+        self._first  = first
+        self._prefix = prefix
+        self._flags  = []
+        self._keys   = { }
+    Name   = property( lambda self : self._name )
+    Path   = property( lambda self : self._path )
+    First  = property( lambda self : self._first )
+    Prefix = property( lambda self : self._prefix )
+
+    def ReadFile( self, basepath ) :
+        full = os.path.join( basepath, self._path )
+        try :
+            fp = open( full, "r" )
+        except IOError as e :
+            print >>sys.stderr, 'Failed to open "%s": %s' % ( full, str(e) )
+            sys.exit(1)
+        found_first = False
+        pat_start   = re.compile( r'\s*#define\s+'+self._first )
+        pat_flag    = re.compile( r'\s*#define\s+('+self._prefix+'\w+)\s+(\(.*\))' )
+        for lno, line in enumerate( fp ) :
+            if not found_first :
+                if pat_start.match( line ) :
+                    found_first = True
+                else :
+                    continue
+            if not found_first :
+                continue
+            m = pat_flag.match( line )
+            if m is None :
+                continue
+            flag = Flag( m.group(1), m.group(2), lno, line.rstrip(), self )
+            self._flags.append( flag )
+            self._keys[m.group(1)] = flag
+        fp.close( )
+
+    def __iter__(self):
+        for flag in self._flags :
+            yield flag
+
+    def __getattr__( self, v ) :
+        return self._keys[v]
+
+    def GetFlags( self, flagbits, allbits=False ) :
+        for flag in self._flags :
+            if allbits  or  flag.IsSet( flagbits ) :
+                yield flag
+        return
+
+class Main( object ) :
+    def __init__( self ) :
+        self._parser = argparse.ArgumentParser( description="IronBee Flags Dumper",
+                                                prog="ib-version" )
+
+    _flagset = {
+        "TX"      : FlagSet( "TX", "include/ironbee/engine_types.h",
+                             "IB_TX_FERROR", "IB_TX_" ),
+        "Conn"    : FlagSet( "Conn", "include/ironbee/engine_types.h",
+                             "IB_CONN_FERROR", "IB_CONN_" ),
+        "Rule"    : FlagSet( "Rule", "include/ironbee/rule_defs.h",
+                             "IB_RULE_FLAG_VALID", "IB_RULE_FLAG_" ),
+        "RuleLog" : FlagSet( "RuleLog", "include/ironbee/rule_defs.h",
+                             "IB_RULE_LOG_FLAG_TX", r'IB_RULE_LOG_(?:FLAG|FILT)_' ),
+    }
+    def Setup( self ) :
+        self._parser.add_argument( "-w", "--which",
+                                   action="store", dest="which", default="TX",
+                                   choices=self._flagset.keys(),
+                                   help="Specify which flags to dump" )
+
+        vgroup = self._parser.add_mutually_exclusive_group()
+        vgroup.add_argument( "value", default=0, type=int, nargs='?',
+                             help="Specify flags value" )
+        vgroup.add_argument( "-a", "--all",
+                             action="store_true", dest="all", default=False,
+                             help="Specify flags value" )
+
+        self._parser.add_argument( "-v", "--verbose",
+                                   action="count", dest="verbose", default=0,
+                                   help="Increment verbosity level" )
+
+        self._parser.add_argument( "-q", "--quiet",
+                                   action="store_true", dest="quiet", default=False,
+                                   help="be vewwy quiet (I'm hunting wabbits)" )
+
+    def Parse( self ) :
+        self._args = self._parser.parse_args()
+
+    Execute = property( lambda self : self._args.verbose )
+    Verbose = property( lambda self : self._args.verbose )
+    Quiet   = property( lambda self : self._args.verbose )
+
+    def ReadFile( self ) :
+        flag_set = self._flagset[self._args.which]
+        base = os.environ['IB_ROOT']
+        flag_set.ReadFile( base )
+        for flag in flag_set.GetFlags( self._args.value, allbits=self._args.all ) :
+            print "{:30s} 0x{:012x}".format( flag.Name, flag.Value )
+
+    def Main( self ) :
+        self.Setup( )
+        self.Parse( )
+        self.ReadFile( )
+
+main = Main( )
+main.Main( )
+
+### Local Variables: ***
+### py-indent-offset:4 ***
+### python-indent:4 ***
+### python-continuation-offset:4 ***
+### tab-width:4  ***
+### End: ***
