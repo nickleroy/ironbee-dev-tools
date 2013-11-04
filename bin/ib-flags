@@ -112,6 +112,8 @@ class Main( object ) :
                              "IB_RULE_FLAG_VALID", "IB_RULE_FLAG_" ),
         "RuleLog" : FlagSet( "RuleLog", "include/ironbee/rule_defs.h",
                              "IB_RULE_LOG_FLAG_TX", r'IB_RULE_LOG_(?:FLAG|FILT)_' ),
+        "TxDump"  : FlagSet( "TxDump", "modules/moddevel_txdump.c",
+                             "TXDUMP_ENABLED", r'TXDUMP_' ),
     }
     def Setup( self ) :
         self._parser.add_argument( "-w", "--which",
@@ -119,11 +121,17 @@ class Main( object ) :
                                    choices=self._flagset.keys(),
                                    help="Specify which flags to dump" )
 
+        class ValueAction(argparse.Action):
+            def __call__(self, parser, namespace, values, option_string=None):
+                if option_string is not None :
+                    namespace.all = True
+                elif values != 0 :
+                    namespace.value = int(values, 0)
         vgroup = self._parser.add_mutually_exclusive_group()
-        vgroup.add_argument( "value", default=0, type=int, nargs='?',
+        vgroup.set_defaults( value=0, all=False )
+        vgroup.add_argument( "value", action=ValueAction, nargs='?',
                              help="Specify flags value" )
-        vgroup.add_argument( "-a", "--all",
-                             action="store_true", dest="all", default=False,
+        vgroup.add_argument( "-a", "--all", action=ValueAction, nargs=0,
                              help="Specify flags value" )
 
         self._parser.add_argument( "-v", "--verbose",
