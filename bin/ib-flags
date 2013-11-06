@@ -116,8 +116,7 @@ class Main( object ) :
                              "TXDUMP_ENABLED", r'TXDUMP_' ),
     }
     def Setup( self ) :
-        self._parser.add_argument( "-w", "--which",
-                                   action="store", dest="which", default="TX",
+        self._parser.add_argument( "which",
                                    choices=self._flagset.keys(),
                                    help="Specify which flags to dump" )
 
@@ -126,13 +125,11 @@ class Main( object ) :
                 if option_string is not None :
                     namespace.all = True
                 elif values != 0 :
+                    namespace.all = False
                     namespace.value = int(values, 0)
-        vgroup = self._parser.add_mutually_exclusive_group()
-        vgroup.set_defaults( value=0, all=False )
-        vgroup.add_argument( "value", action=ValueAction, nargs='?',
-                             help="Specify flags value" )
-        vgroup.add_argument( "-a", "--all", action=ValueAction, nargs=0,
-                             help="Specify flags value" )
+        self._parser.set_defaults( value=0, all=True )
+        self._parser.add_argument( "value", action=ValueAction, nargs='?',
+                                   help="Specify flags value" )
 
         self._parser.add_argument( "-v", "--verbose",
                                    action="count", dest="verbose", default=0,
