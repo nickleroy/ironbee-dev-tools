@@ -324,6 +324,9 @@ class Main( object ) :
         self._parser.add_argument( "--no-force",
                                    action="store_false", dest="force",
                                    help="Don't force make / wipe" )
+        self._parser.add_argument( "--keep-going", "-k",
+                                   action="store_true", dest="keep_going", default=False,
+                                   help="Keep going to make")
         self._parser.add_argument( "--yes", "-y",
                                    action="store_true", dest="defaultyn", default=False,
                                    help="Set default confirm answer to \"yes\"" )
@@ -517,6 +520,8 @@ class Main( object ) :
             cmd = None
         elif type(target) == MakeTarget :
             cmd = target.GetMakeCommand( execute, self._args.max_jobs, self._args.nice )
+            if self._args.keep_going :
+                cmd.append( '-k' )
             execute = True
         else :
             cmd = target.GetCommand( self._args.nice, args=args )
