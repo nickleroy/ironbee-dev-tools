@@ -96,12 +96,11 @@ class _ToolStrace( _Tool ) :
         _Tool.__init__( self, name, prefix=self._strace_prefix )
 
 class _ToolValgrind( _Tool ) :
-    _valgrind_prefix = ( "${ToolName}",
+    _valgrind_prefix = ( "valgrind",
                          "--tool=${SubTool}",
-                         "--log-file=${ToolOut}",
-                         "--leak-check=full" )
-    def __init__( self, name, defs ) :
-        _Tool.__init__( self, name, prefix=self._valgrind_prefix, defs=defs )
+                         "--log-file=${ToolOut}")
+    def __init__( self, name, defs, args=None ) :
+        _Tool.__init__( self, name, prefix=self._valgrind_prefix, tool_args=args, defs=defs )
     def Prefix( self ) :
         prefix = list(self._prefix) + [ "-v" for i in range(self._verbose) ]
         return prefix
@@ -167,8 +166,11 @@ class IbToolMain( object ) :
         "gdb"      : _ToolGdb( "gdb" ),
         "gdb-core" : _ToolGdbCore( "gdb" ),
         "strace"   : _ToolStrace( "strace" ),
-        "valgrind" : _ToolValgrind("valgrind", defs={"SubTool":"memcheck"}),
-        "helgrind" : _ToolValgrind("helgrind", defs={"SubTool":"helgrind"}),
+        "valgrind" : _ToolValgrind("valgrind",
+                                   args=("--leak-check=full", "--track-origins=yes"),
+                                   defs={"SubTool":"memcheck"}),
+        "helgrind" : _ToolValgrind("helgrind",
+                                   defs={"SubTool":"helgrind"}),
     }
 
     _global_defs = {
