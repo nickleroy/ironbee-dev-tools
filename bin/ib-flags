@@ -105,7 +105,7 @@ class Main( object ) :
 
     _flagset = {
         "TX"      : FlagSet( "TX", "include/ironbee/engine_types.h",
-                             "IB_TX_FERROR", "IB_TX_" ),
+                             "IB_TX_FHTTP09", "IB_TX_" ),
         "Conn"    : FlagSet( "Conn", "include/ironbee/engine_types.h",
                              "IB_CONN_FERROR", "IB_CONN_" ),
         "Rule"    : FlagSet( "Rule", "include/ironbee/rule_defs.h",
