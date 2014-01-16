@@ -167,10 +167,16 @@ class IbToolMain( object ) :
         "gdb-core" : _ToolGdbCore( "gdb" ),
         "strace"   : _ToolStrace( "strace" ),
         "valgrind" : _ToolValgrind("valgrind",
-                                   args=("--leak-check=full", "--track-origins=yes"),
+                                   args=("--leak-check=full",
+                                         "--track-origins=yes",
+                                         "--track-fds=yes",
+                                         "--freelist-vol=200000000",
+                                         "--fair-sched=no"),
                                    defs={"SubTool":"memcheck"}),
         "helgrind" : _ToolValgrind("helgrind",
                                    defs={"SubTool":"helgrind"}),
+        "drd" : _ToolValgrind("drd",
+                              defs={"SubTool":"drd"}),
     }
 
     _global_defs = {
@@ -253,6 +259,12 @@ class IbToolMain( object ) :
         self._parser.add_argument( "--helgrind",
                                    action="store_const", dest="tool", const="helgrind",
                                    help="Run %s under helgrind" % (self.Name) )
+        self._parser.add_argument( "--drd",
+                                   action="store_const", dest="tool", const="drd",
+                                   help="Run %s under valgrind/DRD" % (self.Name) )
+        self._parser.add_argument( "--tsan",
+                                   action="store_const", dest="tool", const="tsan",
+                                   help="Run %s under TreadSanitizer" % (self.Name) )
 
         self._parser.add_argument( "--force-make", "-f",
                                    action="store_true", dest="force_make", default=False,
