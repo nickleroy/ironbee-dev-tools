@@ -413,7 +413,7 @@ class FileProcessor( object ) :
 
         return line_state.LineFull
 
-    def BuildState( self, fp_in, fp_out, defs ) :
+    def InitDefs( self, fp_in, fp_out, defs ) :
         basename = os.path.basename( fp_in.name )
         if fp_out is not None :
             defs.Set('OutFile', os.path.basename(fp_out.name))
@@ -421,6 +421,9 @@ class FileProcessor( object ) :
         defs.Set('InFilePath', fp_in.name)
         baseid = re.sub( r'\..+', r'', basename)
         defs.Set('Base', baseid, over=True)
+
+    def BuildState( self, fp_in, fp_out, defs ) :
+        self.InitDefs( fp_in, fp_out, defs )
         return FileState( fp_in, fp_out, defs )
 
     def ProcessFile( self, fp_in, fp_out=None, copy_defs=True ) :
@@ -453,6 +456,8 @@ class FileProcessor( object ) :
                 print >>fp_out, line_state.LineFull
             line_state.LineEnd( )
         self._fstate = self._fstack.pop(-1)
+        if not copy_defs :
+            self.InitDefs( self._fstate.InFile, self._fstate.OutFile, self._fstate.Defs )
         if self._args.verbose >= 1 and self._fstate is not None:
             print 'ProcessFile: Done with(%s) now(%s, %s)' % \
                 (str(fp_in), str(self.FileState.InFile), str(self.FileState.OutFile))
