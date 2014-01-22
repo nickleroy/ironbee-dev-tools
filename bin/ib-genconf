@@ -590,9 +590,9 @@ class Main( object ) :
                 self._main_defs.Set("iface:"+name, ip, over=False)
                 if ip.startswith("192.168") :
                     self._main_defs.Set("iface:private", ip, over=False)
-                elif name.startswith("eth") :
+                elif name.startswith( ("eth", "enp") ) :
                     self._main_defs.Set("iface:public", ip, over=False)
-                if name.startswith("eth") :
+                if name.startswith( ("eth", "enp") ) :
                     self._main_defs.Set("iface:eth", ip, over=False)
             except KeyError :
                 continue
