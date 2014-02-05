@@ -18,6 +18,7 @@
 import re
 import os
 import sys
+import math
 import copy
 import glob
 import subprocess
@@ -419,6 +420,13 @@ class IbToolMain( object ) :
                                    action="store_const", dest="dump_mode", const="expand",
                                    help="Dump expanded definition table and exit." )
 
+        self._parser.add_argument( "--jobs", "-j",
+                                   action="store", type=int, dest="max_jobs", default=0,
+                                   help="Force number of # jobs to run" )
+        self._parser.add_argument( "-1",
+                                   action="store_const", dest="max_jobs", const=1,
+                                   help="Force number of # jobs to run to 1 (-j 1)" )
+
         self._parser.add_argument( "--execute",
                                    action="store_true", dest="execute", default=True,
                                    help="Enable execution <default>" )
@@ -432,9 +440,21 @@ class IbToolMain( object ) :
                                    action="store_true", dest="quiet", default=False,
                                    help="be vewwy quiet (I'm hunting wabbits)" )
 
+    def CalcMaxJobs( self ) :
+        cores = set()
+        compiled = re.compile( r'core id\s+:\s+(\d+)' )
+        for line in open( "/proc/cpuinfo" ) :
+            m = compiled.match( line )
+            if m is not None :
+                cores.add( m.group(1) )
+        aggression = 0.5
+        return int(math.floor((len(cores) * aggression) + 0.5))
+
     def Parse( self ) :
         self._args, tool_args = self._parser.parse_known_args()
         self._args.tool_args = tool_args
+        if self._args.max_jobs == 0 :
+            self._args.max_jobs = self.CalcMaxJobs( )
 
     def GetIbVersion( self ) :
         if self._defs.Lookup( 'IbVersion' ) is not None :
@@ -477,6 +497,8 @@ class IbToolMain( object ) :
             self._defs.Append("MakeArgs", "DUMP=dump")
             verbose = [ '-v' for n in range(self._args.verbose) ]
             self._defs.Append("MakeArgs", "VERBOSE="+' '.join(verbose))
+        if self._args.max_jobs > 1 :
+            self._defs.Append("MakeArgs", ("-j", str(self._args.max_jobs)) )
         if self._args.force_make :
             self._defs.Append("MakeArgs", "-B")
         if self._args.log_level is not None :
@@ -486,8 +508,6 @@ class IbToolMain( object ) :
         if self._args.rule_debug_level is not None :
             self._defs.Append("MakeArgs", "RULE_DEBUG_LEVEL="+self._args.rule_debug_level)
         self._defs.Append("MakeArgs", self._args.targets)
-        #self._defs.Append("MakeArgs", '-j')
-        #self._defs.Append("MakeArgs", '4')
 
     def AddPrePair( self, name, dirpath ) :
         base_cmd = ('make', '-C', dirpath, '${MakeArgs}')
