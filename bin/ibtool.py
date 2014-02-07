@@ -183,13 +183,13 @@ class IbToolMain( object ) :
     _global_defs = {
         "PID"           : str(os.getpid()),
         "Run"           : "${PID}",
-        "Devel"         : os.environ["QYLS_DEVEL"],
-        "Var"           : os.environ.get("QYLS_VAR", "${Devel}/var"),
+        "Devel"         : os.environ["QLYS_DEVEL"],
+        "Var"           : os.environ.get("QLYS_VAR", "${Devel}/var"),
         "BaseLogDir"    : "${Var}/log",
         "LogDir"        : "${BaseLogDir}",
         "LogFiles"      : "${LogDir}/*",
-        "Etc"           : os.environ.get("QYLS_ETC", "${Devel}/etc"),
-        "EtcIn"         : os.environ.get("QYLS_ETC_IN", "${Devel}/etc.in"),
+        "Etc"           : os.environ.get("QLYS_ETC", "${Devel}/etc"),
+        "EtcIn"         : os.environ.get("QLYS_ETC_IN", "${Devel}/etc.in"),
         "MakeArgs"      : [ ],
         "Cmd"           : [ "${Executable}", "${Args}" ],
         "IbInstall"     : os.environ["IB_INSTALL"],
@@ -491,7 +491,7 @@ class IbToolMain( object ) :
         for post in ( "HOST", "DOMAIN", "FQDN", "IPADDR", "FULL" ) :
             envname = "IF_"+self._args.interface+"_"+post
             if envname in os.environ :
-                self._defs.Append("MakeArgs", "QYLS_"+post+"="+os.environ[envname])
+                self._defs.Append("MakeArgs", "QLYS_"+post+"="+os.environ[envname])
 
         if self._args.verbose :
             self._defs.Append("MakeArgs", "DUMP=dump")

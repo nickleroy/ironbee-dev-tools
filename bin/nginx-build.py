@@ -22,7 +22,7 @@ import subprocess
 # Find the source, etc.
 pkgname = os.path.basename(os.getcwd())
 src_dir = os.path.join(os.environ['IB_ROOT'], 'servers/nginx')
-install = os.path.join(os.environ['QYLS_BUILD'], 'gcc/install')
+install = os.path.join(os.environ['QLYS_BUILD'], 'gcc/install')
 os.environ['NGINXIB_CONFIG_FILE'] = os.path.join(src_dir, 'config.nginx')
 lib_dir = os.path.join(install, 'lib64')
 
