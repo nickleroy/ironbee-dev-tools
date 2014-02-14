@@ -17,6 +17,7 @@
 # ****************************************************************************
 import os
 import sys
+import subprocess
 
 from ibtool import *
 
@@ -40,6 +41,14 @@ class Main( IbToolMain ) :
     def __init__( self ) :
         IbToolMain.__init__( self, self._ats_defs )
         self.AddPrePair( 'ATS', '${AtsEtcIn}' )
+
+    def SetupMakeArgs( self ) :
+        IbToolMain.SetupMakeArgs( self )
+        install = self._defs.Lookup('IbInstall')
+        cmd = ['nm', os.path.join(install, 'libexec', 'ts_ironbee.so')]
+        output = subprocess.check_output( cmd )
+        if 'ib_ats_cmd_sock' in output :
+            self._defs.Append("MakeArgs", "IB_ATS_ARGS=-s /tmp/ib-ats-cmdsock")
 
 main = Main( )
 main.Main( )
