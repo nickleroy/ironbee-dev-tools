@@ -1,0 +1,436 @@
+#! /usr/bin/env python
+# ****************************************************************************
+# Licensed to Qualys, Inc. (QUALYS) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# QUALYS licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ****************************************************************************
+import os
+import sys
+import subprocess
+import argparse
+import signal
+import socket
+import time
+
+_main = None
+
+class _BaseResponse( object ) :
+    _responses = [ ]
+    def __init__( self, _name, _str ) :
+        self._name = _name
+        self._str = _str
+        self._data = None
+    Name = property( lambda self : self._name )
+    def __str__( self ) :
+        return '%s "%s"' % (self._name, self._str)
+
+    @classmethod
+    def Recv( cls, sock ) :
+        try:
+            reply = sock.recv(128)
+            response = cls.Create( reply )
+            assert response is not None
+            if _main.Verbose :
+                print 'received %s' % (response)
+            return response
+        except socket.error as e :
+            print >>sys.stderr, e
+
+    @classmethod
+    def Create( cls, _str ) :
+        for subclass in cls.__subclasses__( ) :
+            if subclass._Match( _str ) :
+                return subclass( _str )
+        return None
+
+    def _ParseData( self, _str ) :
+        try :
+            return int(_str)
+        except ValueError :
+            return _str
+
+    def _SetData( self, _str ) :
+        (x,data) = _str.split(':', 1)
+        self._data = self._ParseData( data )
+
+    Data = property( lambda self : self._data )
+    def MatchData( self, data ) :
+        if data is None :
+            return True
+        assert type(data) == type(self._data)
+        return data == self._data
+
+class _ResponseOk( _BaseResponse ) :
+    def __init__( self, _str ) :
+        assert self._Match( _str )
+        _BaseResponse.__init__( self, "OK", _str )
+
+    @staticmethod
+    def _Match( _str ) :
+        return _str == "OK"
+
+class _ResponseOkData( _BaseResponse ) :
+    def __init__( self, _str ) :
+        assert self._Match( _str )
+        _BaseResponse.__init__( self, "OK+Data", _str )
+        self._SetData( _str )
+    @staticmethod
+    def _Match( _str ) :
+        return _str.startswith( "OK/DATA:" )
+
+class _ResponseFailed( _BaseResponse ) :
+    def __init__( self, _str ) :
+        assert self._Match( _str )
+        _BaseResponse.__init__( self, "Failed", _str )
+        self._SetData( _str )
+    @staticmethod
+    def _Match( _str ) :
+        return _str.startswith( "FAILED/DATA:" )
+
+class _ResponseInvalid( _BaseResponse ) :
+    def __init__( self, _str ) :
+        assert self._Match( _str )
+        _BaseResponse.__init__( self, "Invalid", _str )
+        self._SetData( _str )
+    @staticmethod
+    def _Match( _str ) :
+        return _str == "INVALID"
+
+
+class _BaseCommand( object ) :
+    def __init__( self, _name, _help ) :
+        assert type(_name) == str and len(_name) > 0
+        assert type(_help) == str
+        self._name = _name
+        self._help = _help
+    def GetName( self ) : return self._name
+    Name = property( GetName )
+    Help = property( lambda self : self._help )
+
+
+class _ServerCommand( _BaseCommand ) :
+    def __init__( self, _name, _help=None, _responses=None ) :
+        if _responses is None :
+            _responses = ( _ResponseOk, _ResponseFailed )
+        assert type(_responses) in (list, tuple)
+        for rsp in _responses :
+            assert issubclass(rsp, _BaseResponse)
+        self._responses = tuple(_responses)
+        _BaseCommand.__init__( self, _name, _help )
+
+    def Send( self, sock ) :
+        try:
+            message = self._name.upper()
+            if _main.Verbose :
+                print >>sys.stderr, 'sending "%s"' % message
+            sock.sendall(message)
+        except socket.error as e :
+            print >>sys.stderr, e
+
+    def SendRecv( self, server_sock, client_sock ) :
+        self.Send( server_sock )
+        response = _BaseResponse.Recv( client_sock )
+        if not _main.Quiet :
+            print 'Sent "%s", received "%s"' % ( self, response )
+        assert type(response) in self._responses
+        return response
+
+    def Execute( self, server_sock, client_sock ) :
+        self.SendRecv( server_sock, client_sock )
+        
+    def _FixupStates( self ) :
+        return
+
+    def __str__( self ) :
+        return self._name
+
+class _DisableCommand( _ServerCommand ) :
+    def __init__( self ) :
+        _ServerCommand.__init__( self, "Disable", "Disable current engine", None )
+
+class _CleanupCommand( _ServerCommand ) :
+    def __init__( self ) :
+        _ServerCommand.__init__( self, "Cleanup", "Cleanup inactive engines", None)
+
+class _CountCommand( _ServerCommand ) :
+    def __init__( self ) :
+        _ServerCommand.__init__( self, "Count", "Get engine count",
+                                 (_ResponseOkData,_ResponseFailed))
+
+class _DestroyCommand( _ServerCommand ) :
+    def __init__( self ) :
+        _ServerCommand.__init__( self, "Destroy", "Destroy engine manager", None)
+
+class _FlushLogCommand( _ServerCommand ) :
+    def __init__( self ) :
+        _ServerCommand.__init__( self, "Flush-log", "Cause server to flush the log messages", None )
+
+class _ExitCommand( _ServerCommand ) :
+    def __init__( self ) :
+        _ServerCommand.__init__( self, "Exit", "Cause server to exit", None )
+
+class _NopCommand( _ServerCommand ) :
+    def __init__( self ) :
+        _ServerCommand.__init__( self, "NOP", "No operation", None )
+
+
+class _CompoundCommand( _BaseCommand ) :
+    class Transition( object ) :
+        def __init__( self, _rsptype, _rspdata, _next ) :
+            assert issubclass(_rsptype, _BaseResponse)
+            assert _next is not None or type(_next) in (State, str)
+            self._rsptype = _rsptype
+            self._rspdata = _rspdata
+            self._next = _next
+        def __str__( self ) :
+            return str(self._rsptype)+str(self._rspdata)
+
+        ResponseType = property( lambda self : self._rsptype )
+        ResponseData = property( lambda self : self._rspdata )
+        NextState = property( lambda self : self._next )
+
+        def _FixupState( self, findfn ) :
+            if self._next is not None and type(self._next) == str :
+                fix = findfn(self._next)
+                assert fix is not None
+                self._next = fix
+
+    class State( object ) :
+        def __init__( self, _name, _cmd, _transitions, _pre=None, _post=None ) :
+            assert type(_name) == str
+            assert _cmd is None or issubclass(_cmd, _ServerCommand)
+            assert type(_transitions) in (tuple,list)
+            if _cmd is not None :
+                assert len(_transitions) > 0
+            for t in _transitions :
+                assert type(t) == _CompoundCommand.Transition
+            assert _pre is None or callable(_pre)
+            assert _post is None or callable(_post)
+            self._name = _name
+            self._cmd = _cmd
+            self._transitions = _transitions
+            self._pre = _pre
+            self._post = _post
+        def __str__( self ) :
+            return self._name
+
+        def GetTransition( self, response ) :
+            for transition in self._transitions :
+                if type(response) == transition.ResponseType :
+                    if response.MatchData(transition.ResponseData) :
+                        if _main.Verbose > 1 :
+                            print 'Transitioning from "%s" to "%s"' % (self, transition.NextState)
+                        return transition
+            return None
+
+        def Execute( self, server_sock, client_sock ) :
+            if self._pre is not None :
+                self._pre( self )
+            cmd = self._cmd( )
+            rsp = cmd.SendRecv( server_sock, client_sock )
+            transition = self.GetTransition( rsp )
+            assert transition is not None
+            if self._post is not None :
+                self._post( self )
+            return transition.NextState
+
+        def GetName( self ) : return self._name
+        Name = property( GetName )
+        Command = property( lambda self : self._cmd )
+        Transitions = property( lambda self : self._transitions )
+        Count = property( lambda self : self._count )
+
+    class EndState( State ) :
+        def __init__( self ) :
+            _CompoundCommand.State.__init__( self, "END", None, () )
+
+    class CountedState( State ) :
+        def __init__( self, _name, _cmd, _responses, _max, _pre=None, _post=None ) :
+            self._max = _max
+            self._count = 0
+            self._localpre = _pre
+            _CompoundCommand.State.__init__( self, _name, _cmd, _responses,
+                                             _pre=_Count, _post=_post )
+        def _Count( self ) :
+            self._count += 1
+            assert self._count < self._max
+            if self._localpre is not None :
+                self._localpre( )
+
+    def __init__( self, _name, _help, states ) :
+        _BaseCommand.__init__( self, _name, _help )
+        assert states is not None and type(states) in (tuple,list) and len(states) > 0
+        for state in states :
+            assert isinstance(state, _CompoundCommand.State)
+        self._states = states
+
+    def _FindState( self, name ) :
+        for state in self._states :
+            if state.Name == name :
+                return state
+        return None
+        
+    def _FixupStates( self ) :
+        for state in self._states :
+            for t in state.Transitions :
+                t._FixupState( self._FindState )
+
+    def Execute( self, server_sock, client_sock ) :
+        state = self._states[0]
+        while type(state) != _CompoundCommand.EndState :
+            new = state.Execute( server_sock, client_sock )
+            if new is None :
+                return False
+            state = new
+        return True
+
+class _ShutdownCommand( _CompoundCommand ) :
+    def __init__( self ) :
+        states = (
+            _CompoundCommand.State( "Disable", _DisableCommand,
+                   (
+                       _CompoundCommand.Transition(_ResponseOk, None, "Count"),
+                   )
+               ),
+            _CompoundCommand.State( "Count", _CountCommand,
+                   (
+                       _CompoundCommand.Transition(_ResponseOkData, 0, "Destroy"),
+                       _CompoundCommand.Transition(_ResponseOkData, None, "Cleanup"),
+                   ),
+               ),
+            _CompoundCommand.State( "Cleanup", _CleanupCommand,
+                   (
+                       _CompoundCommand.Transition(_ResponseOk, None, "Count"),
+                   ),
+                   _post=lambda self : time.sleep(1),
+               ),
+            _CompoundCommand.State( "Destroy", _DestroyCommand,
+                   (
+                       _CompoundCommand.Transition(_ResponseOk, None, "Exit"),
+                   )
+               ),
+            _CompoundCommand.State( "Exit", _ExitCommand,
+                   (
+                       _CompoundCommand.Transition(_ResponseOk, None, "END"),
+                   )
+               ),
+            _CompoundCommand.EndState( ),
+        )
+
+
+        _CompoundCommand.__init__( self, "Shutdown", "Cleanly shutdown and exit", states )
+        
+
+class _Main( object ) :
+
+    # Commands to send to server
+    _commands = (
+        _DisableCommand( ),
+        _CleanupCommand( ),
+        _CountCommand( ),
+        _DestroyCommand( ),
+        _ExitCommand( ),
+        _FlushLogCommand( ),
+        _NopCommand( ),
+        _ShutdownCommand( ),
+    )
+    for cmd in _commands :
+        cmd._FixupStates( )
+
+    def __init__( self ) :
+
+        self._parser = argparse.ArgumentParser( description="Send command to an IB server",
+                                                prog="ib-server" )
+
+        # Command socket path
+        self._parser.add_argument( "--path",
+                                   action="store", dest="sock_path",
+                                   default="/tmp/ib-ats-cmdsock",
+                                   help="Specify path to command socket" )
+
+        self._parser.set_defaults( commands=[] )
+        self._parser.add_argument( "commands",
+                                   choices=tuple( [cmd.Name for cmd in self._commands] ),
+                                   action="append",
+                                   help = "Specify command")
+        
+        self._parser.add_argument( "--server", "-s",
+                                   action="store", dest="server", type=str, default="ATS",
+                                   choices=("ATS", "Apache", "NGINX"),
+                                   help="Specify server type" )
+        self._parser.add_argument( "--timeout", "-t",
+                                   action="store", dest="timeout", type=float, default=5,
+                                   help="Specify timeout" )
+
+        self._parser.add_argument( "--execute",
+                                   action="store_true", dest="execute", default=True,
+                                   help="Enable execution <default>" )
+        self._parser.add_argument( "-n", "--no-execute",
+                                   action="store_false", dest="execute",
+                                   help="Disable execution (for test/debug)" )
+        self._parser.add_argument( "-v", "--verbose",
+                                   action="count", dest="verbose", default=0,
+                                   help="Increment verbosity level" )
+        self._parser.add_argument( "-q", "--quiet",
+                                   action="store_true", dest="quiet", default=False,
+                                   help="be vewwy quiet (I'm hunting wabbits)" )
+
+    def ParseArgs( self ) :
+        self._args = self._parser.parse_args()
+        if self._args.server != "ATS" :
+            self._parser.error( 'Currently only "ATS" server supported ("%s" specified)' %
+                                (self_args.server) )
+
+    def FindCommand( self, _str ) :
+        for cmd in self._commands :
+            if cmd.Name == _str :
+                return cmd
+        return None
+
+    def SendCommands( self ) :
+        # Create a UDS socket
+        server_path = self._args.sock_path + '.server';
+        server_sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+
+        # Connect the socket to the port where the server is listening
+        print 'connecting to %s' % server_path
+        try:
+            server_sock.connect(server_path)
+        except socket.error, msg:
+            print >>sys.stderr, msg
+            sys.exit(1)
+
+        client_path = self._args.sock_path + '.client';
+        if os.path.exists(client_path) :
+            os.remove(client_path)
+        client_sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        client_sock.bind(client_path)
+
+        for cmdstr in self._args.commands :
+            cmd = self.FindCommand( cmdstr )
+            assert cmd is not None
+            if self._args.execute :
+                print "Executing command \"%s\"" % ( cmdstr )
+                cmd.Execute( server_sock, client_sock )
+            else :
+                print "Not executing command \"%s\"" % ( cmdstr )
+        server_sock.close()
+        client_sock.close()
+
+    def Main( self ) :
+        self.ParseArgs()
+        self.SendCommands()
+
+_main = _Main( )
+_main.Main( )
