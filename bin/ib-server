@@ -46,6 +46,8 @@ class _BaseResponse( object ) :
             return response
         except socket.error as e :
             print >>sys.stderr, e
+        except KeyboardInterrupt :
+            sys.exit(0)
 
     @classmethod
     def Create( cls, _str ) :
@@ -127,6 +129,7 @@ class _ServerCommand( _BaseCommand ) :
         for rsp in _responses :
             assert issubclass(rsp, _BaseResponse)
         self._responses = tuple(_responses)
+        self._sent = None
         _BaseCommand.__init__( self, _name, _help )
 
     def Send( self, sock ) :
@@ -135,6 +138,7 @@ class _ServerCommand( _BaseCommand ) :
             if _main.Verbose :
                 print >>sys.stderr, 'sending "%s"' % message
             sock.sendall(message)
+            self._sent = message
         except socket.error as e :
             print >>sys.stderr, e
 
@@ -142,7 +146,7 @@ class _ServerCommand( _BaseCommand ) :
         self.Send( server_sock )
         response = _BaseResponse.Recv( client_sock )
         if not _main.Quiet :
-            print 'Sent "%s", received "%s"' % ( self, response )
+            print 'Sent %s, received %s @ %0.2f' % ( self, response, _main.TimeElapsed )
         assert type(response) in self._responses
         return response
 
@@ -153,7 +157,10 @@ class _ServerCommand( _BaseCommand ) :
         return
 
     def __str__( self ) :
-        return self._name
+        if self._sent is None :
+            return self._name
+        else :
+            return self._name+' "'+self._sent+'"'
 
 class _DisableCommand( _ServerCommand ) :
     def __init__( self ) :
@@ -166,6 +173,10 @@ class _CleanupCommand( _ServerCommand ) :
 class _CountCommand( _ServerCommand ) :
     def __init__( self ) :
         _ServerCommand.__init__( self, "Count", "Get engine count",
+                                 (_ResponseOkData,_ResponseFailed))
+class _CurrentCommand( _ServerCommand ) :
+    def __init__( self ) :
+        _ServerCommand.__init__( self, "Current", "Get current engine",
                                  (_ResponseOkData,_ResponseFailed))
 
 class _DestroyCommand( _ServerCommand ) :
@@ -245,6 +256,9 @@ class _CompoundCommand( _BaseCommand ) :
                 self._post( self )
             return transition.NextState
 
+        @staticmethod
+        def Sleep( seconds=None ) :
+            return _CompoundCommand.Sleep( seconds )
         def GetName( self ) : return self._name
         Name = property( GetName )
         Command = property( lambda self : self._cmd )
@@ -254,6 +268,7 @@ class _CompoundCommand( _BaseCommand ) :
     class EndState( State ) :
         def __init__( self ) :
             _CompoundCommand.State.__init__( self, "END", None, () )
+    EndStateName = property( lambda self : "END" )
 
     class CountedState( State ) :
         def __init__( self, _name, _cmd, _responses, _max, _pre=None, _post=None ) :
@@ -295,41 +310,103 @@ class _CompoundCommand( _BaseCommand ) :
             state = new
         return True
 
+    @staticmethod
+    def Sleep( seconds ) :
+        if seconds is None :
+            seconds = _main.SleepSeconds
+        try :
+            time.sleep( seconds )
+        except KeyboardInterrupt :
+            sys.exit( 1 )
+
 class _ShutdownCommand( _CompoundCommand ) :
     def __init__( self ) :
         states = (
-            _CompoundCommand.State( "Disable", _DisableCommand,
-                   (
-                       _CompoundCommand.Transition(_ResponseOk, None, "Count"),
-                   )
-               ),
-            _CompoundCommand.State( "Count", _CountCommand,
-                   (
-                       _CompoundCommand.Transition(_ResponseOkData, 0, "Destroy"),
-                       _CompoundCommand.Transition(_ResponseOkData, None, "Cleanup"),
-                   ),
-               ),
-            _CompoundCommand.State( "Cleanup", _CleanupCommand,
-                   (
-                       _CompoundCommand.Transition(_ResponseOk, None, "Count"),
-                   ),
-                   _post=lambda self : time.sleep(1),
-               ),
-            _CompoundCommand.State( "Destroy", _DestroyCommand,
-                   (
-                       _CompoundCommand.Transition(_ResponseOk, None, "Exit"),
-                   )
-               ),
-            _CompoundCommand.State( "Exit", _ExitCommand,
-                   (
-                       _CompoundCommand.Transition(_ResponseOk, None, "END"),
-                   )
-               ),
+            _CompoundCommand.State(
+                "Initial Count", _CountCommand,
+                (
+                    _CompoundCommand.Transition(_ResponseOkData, None, "Disable"),
+                )
+            ),
+            _CompoundCommand.State(
+                "Disable", _DisableCommand,
+                (
+                    _CompoundCommand.Transition(_ResponseOk, None, "Count"),
+                )
+            ),
+            _CompoundCommand.State(
+                "Count", _CountCommand,
+                (
+                    _CompoundCommand.Transition(_ResponseOkData, 0, "Destroy"),
+                    _CompoundCommand.Transition(_ResponseOkData, None, "Cleanup"),
+                ),
+            ),
+            _CompoundCommand.State(
+                "Cleanup", _CleanupCommand,
+                (
+                    _CompoundCommand.Transition(_ResponseOk, None, "Count"),
+                ),
+                _post=lambda self : self.Sleep( ),
+            ),
+            _CompoundCommand.State(
+                "Destroy", _DestroyCommand,
+                (
+                    _CompoundCommand.Transition(_ResponseOk, None, "Flush"),
+                )
+            ),
+            _CompoundCommand.State(
+                "Flush", _FlushLogCommand,
+                (
+                    _CompoundCommand.Transition(_ResponseOk, None, "Exit"),
+                )
+            ),
+            _CompoundCommand.State(
+                "Exit", _ExitCommand,
+                (
+                    _CompoundCommand.Transition(_ResponseOk, None, self.EndStateName),
+                )
+            ),
             _CompoundCommand.EndState( ),
         )
 
 
         _CompoundCommand.__init__( self, "Shutdown", "Cleanly shutdown and exit", states )
+
+class _CountLoopCommand( _CompoundCommand ) :
+    def __init__( self ) :
+        states = (
+            _CompoundCommand.State(
+                "Count", _CountCommand,
+                (
+                    _CompoundCommand.Transition(_ResponseOkData, 0, self.EndStateName),
+                    _CompoundCommand.Transition(_ResponseOkData, None, "Count"),
+                ),
+                _post=lambda self : self.Sleep( ),
+            ),
+            _CompoundCommand.EndState( ),
+        )
+
+        _CompoundCommand.__init__( self, "CountLoop", "Count in a loop until count is zero", states )
+
+class _CleanupCountCommand( _CompoundCommand ) :
+    def __init__( self ) :
+        states = (
+            _CompoundCommand.State(
+                "Cleanup", _CleanupCommand,
+                (
+                    _CompoundCommand.Transition(_ResponseOk, None, "Count"),
+                ),
+            ),
+            _CompoundCommand.State(
+                "Count", _CountCommand,
+                (
+                    _CompoundCommand.Transition(_ResponseOkData, None, self.EndStateName),
+                ),
+            ),
+            _CompoundCommand.EndState( ),
+        )
+
+        _CompoundCommand.__init__( self, "CleanupCount", "Perform cleanup then count", states )
         
 
 class _Main( object ) :
@@ -339,6 +416,9 @@ class _Main( object ) :
         _DisableCommand( ),
         _CleanupCommand( ),
         _CountCommand( ),
+        _CleanupCountCommand( ),
+        _CurrentCommand( ),
+        _CountLoopCommand( ),
         _DestroyCommand( ),
         _ExitCommand( ),
         _FlushLogCommand( ),
@@ -372,6 +452,9 @@ class _Main( object ) :
         self._parser.add_argument( "--timeout", "-t",
                                    action="store", dest="timeout", type=float, default=5,
                                    help="Specify timeout" )
+        self._parser.add_argument( "--sleep", "-ss",
+                                   action="store", dest="sleep_seconds", type=float, default=1,
+                                   help="Specify default sleep duration in seconds" )
 
         self._parser.add_argument( "--execute",
                                    action="store_true", dest="execute", default=True,
@@ -385,6 +468,15 @@ class _Main( object ) :
         self._parser.add_argument( "-q", "--quiet",
                                    action="store_true", dest="quiet", default=False,
                                    help="be vewwy quiet (I'm hunting wabbits)" )
+
+    Verbose = property( lambda self : self._args.verbose )
+    Quiet = property( lambda self : self._args.quiet )
+    Execute = property( lambda self : self._args.execute )
+    TimeNow = property( lambda self : time.time() )
+    TimeAsc = property( lambda self : time.asctime() )
+    TimeStart = property( lambda self : self._start_time )
+    TimeElapsed = property( lambda self : time.time() - self._start_time )
+    SleepSeconds = property( lambda self : self._args.sleep_seconds )
 
     def ParseArgs( self ) :
         self._args = self._parser.parse_args()
@@ -417,6 +509,8 @@ class _Main( object ) :
         client_sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
         client_sock.bind(client_path)
 
+        self._start_time = time.time()
+        print "Starting @", self.TimeAsc
         for cmdstr in self._args.commands :
             cmd = self.FindCommand( cmdstr )
             assert cmd is not None
