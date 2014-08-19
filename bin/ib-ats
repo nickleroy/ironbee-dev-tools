@@ -42,6 +42,9 @@ class Main( IbToolMain ) :
         IbToolMain.__init__( self, self._ats_defs )
         self.AddPrePair( 'ATS', '${AtsEtcIn}' )
 
+        cmds = self._defs.Get('PreCmds')
+        cmds.Create('SetupAts', 5, ('ib-setup-ats',))
+
     def SetupMakeArgs( self ) :
         IbToolMain.SetupMakeArgs( self )
         install = self._defs.Lookup('IbInstall')

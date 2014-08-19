@@ -334,7 +334,19 @@ class IbToolMain( object ) :
         self._parser.set_defaults( targets=("default",) )
         self._parser.add_argument( "--targets",
                                    action="store", dest="targets", nargs="+",
-                                   help="make clean in etc directories")
+                                   help="Specify default make targets (in etc directories)")
+
+        self._parser.set_defaults( tool_args=[] )
+        class ToolArgsAction(argparse.Action):
+            def __call__(self, parser, namespace, values, option_string=None):
+                for v in values :
+                    namespace.tool_args += v.split(',')
+        self._parser.add_argument( "--tool-args",
+                                   action=ToolArgsAction, dest="tool_args", nargs=1,
+                                   help="Specify tool arguments (with comma separator)")
+        self._parser.add_argument( "--tool-arg",
+                                   action="append", dest="tool_args",
+                                   help="Specify single tool argument")
 
         self._parser.add_argument( "--out", "-o",
                                    dest="output", type=argparse.FileType('w'), default=None,
@@ -355,6 +367,10 @@ class IbToolMain( object ) :
         self._parser.add_argument( "--disable-main", "--dm", "--no-main",
                                    action="store_false", dest="main", default=True,
                                    help="Disable running of "+self.Name )
+
+        self._parser.add_argument( "--disable-make-n",
+                                   action="store_false", dest="make_n", default=True,
+                                   help='Disable running of "make -n" for --no-execute' )
 
         self._parser.add_argument( "--interface", "--if",
                                    action="store", dest="interface", default="NET",
@@ -451,8 +467,7 @@ class IbToolMain( object ) :
         return int(math.floor((len(cores) * aggression) + 0.5))
 
     def Parse( self ) :
-        self._args, tool_args = self._parser.parse_known_args()
-        self._args.tool_args = tool_args
+        self._args = self._parser.parse_args()
         if self._args.max_jobs == 0 :
             self._args.max_jobs = self.CalcMaxJobs( )
 
@@ -584,7 +599,7 @@ class IbToolMain( object ) :
                 print >>f, "LastToolOut="+tool_out
             f.close()
         except IOError as e :
-            print "Failed to write to last file", fpath, ":", e
+            print >>sys.stderr, "Failed to write to last file", fpath, ":", e
 
     def DumpTable( self ) :
         if self._args.dump_mode is None :
@@ -600,7 +615,7 @@ class IbToolMain( object ) :
             if len(argv) == 0 :
                 continue
             if not self._args.execute :
-                if cmd.IsMake  and  self._args.verbose :
+                if cmd.IsMake  and  self._args.verbose  and  self._args.make_n:
                     argv[1:1] = ( "-n", )
                 else :
                     print "Not running:", argv
@@ -615,6 +630,8 @@ class IbToolMain( object ) :
     def RunProgram( self ) :
         tmp = [ ]
         tmp += self._tool.Prefix( )
+        print self._args.tool_args
+        print self._tool.ToolArgs(self._args.tool_args)
         tmp += self._tool.ToolArgs(self._args.tool_args)
         tmp += self._tool.ProgArgs(self._defs.Lookup("Cmd"))
         cmd = self._defs.ExpandItem( tmp )

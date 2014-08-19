@@ -465,7 +465,8 @@ class Main( object ) :
             if m is not None :
                 cores.add( m.group(1) )
         aggression = 0.5 if self._args.aggression < 0.5 else self._args.aggression
-        return int(math.floor((len(cores) * aggression) + 0.5))
+        v = int(math.floor((len(cores) * aggression) + 0.5))
+        return 1 if v < 1 else v
 
     def _ParseArgs( self ) :
         self._args = self._parser.parse_args()
