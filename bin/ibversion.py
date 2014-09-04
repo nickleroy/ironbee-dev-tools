@@ -76,8 +76,8 @@ class IbVersion( object ) :
     def _SetPath( self, path ) :
         self._path = path
 
-    Major     = property( lambda self : self._GetVersionItem(1) )
-    Minor     = property( lambda self : self._GetVersionItem(2) )
+    Major     = property( lambda self : self._GetVersionItem(0) )
+    Minor     = property( lambda self : self._GetVersionItem(1) )
     Release   = property( lambda self : self._GetVersionItem(2) )
     Version   = property( lambda self : self._elements )
     Elements  = property( lambda self : len(self._elements) )
