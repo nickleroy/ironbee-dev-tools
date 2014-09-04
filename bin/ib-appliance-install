@@ -1,0 +1,612 @@
+#! /usr/bin/env python
+###########################################################################
+##
+## Copyright(c) 2014 by Nick LeRoy, 310 Jones Ave, Fort Atkinson, WI
+##
+## This program is free software: you can redistribute it and/or modify
+## it under the terms of the GNU General Public License as published by
+## the Free Software Foundation, either version 3 of the License, or
+## (at your option) any later version.
+## 
+## This program is distributed in the hope that it will be useful,
+## but WITHOUT ANY WARRANTY; without even the implied warranty of
+## MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+## GNU General Public License for more details.
+## 
+## You should have received a copy of the GNU General Public License
+## along with this program.  If not, see <http://www.gnu.org/licenses/>.
+##
+###########################################################################
+import re
+import os
+import sys
+import pwd
+import glob
+import subprocess
+import argparse
+import platform
+import time
+
+class PubKeyError( BaseException ) : pass
+class InvalidKey( PubKeyError ) : pass
+class KeyMismatch( PubKeyError ) : pass
+class KeyParseError( PubKeyError ) : pass
+class KeyImportError( PubKeyError ) : pass
+class DuplicateKey( PubKeyError ) : pass
+
+class KeyLineParser( object ) :
+    class ParsedKey( object ) :
+        def __init__( self, line, ident, key_type, key, owner, user, host ):
+            self._line     = line
+            self._ident    = ident
+            self._key_type = key_type
+            self._key      = key
+            self._owner    = owner
+            self._user     = user
+            self._host     = host
+
+        Line     = property( lambda self : self._line )
+        Identity = property( lambda self : self._ident )
+        KeyType  = property( lambda self : self._key_type )
+        Key      = property( lambda self : self._key )
+        Owner    = property( lambda self : self._owner )
+        User     = property( lambda self : self._user )
+        Host     = property( lambda self : self._host )
+
+    def __init__( self, _min_key=128 ) :
+        self._min_key = _min_key
+
+    @classmethod
+    def IsParsedKey( cls, obj ) :
+        return obj is not None  and  isinstance(obj, cls.ParsedKey)
+
+    def ParseItems( self, ident, owner, key, line=None ) :
+        # Check the identity
+        try :
+            ssh, key_type = ident.split( '-' )
+            if ssh != "ssh" :
+                raise KeyParseError( 'Not an SSH key ("'+ssh+'")' )
+        except ValueError :
+            raise KeyParseError( 'Invalid identity string ("'+ident+'")' )
+
+        # Check the owner
+        try :
+            user, host = owner.split( '@' )
+        except ValueError :
+            raise KeyParseError( 'Invalid owner string ("'+owner+'")' )
+
+        # Check the key itself
+        if len(key) < self._min_key :
+            raise KeyParseError( 'Key too short ('+len(key)+')' )
+
+        # Create a raw line if none available
+        if line is None :
+            line = " ".join( (ident, key, owner) )
+        return self.ParsedKey( line, ident, key_type, key, owner, user, host )
+
+    def ParseKeyLine( self, line ) :
+        assert line is not None
+        split = line.split(' ', 2)
+        if len(split) != 3 :
+            raise KeyParseError( "Invalid key line" )
+        ident = split[0]
+        key = split[1]
+        owner = split[2]
+        if ident is None  or  key is None  or owner is None :
+            raise KeyParseError( "Invalid key line" )
+        return self.ParseItems( ident, owner, key, line )
+
+
+class SshPublicKey( object ) :
+    _parser = KeyLineParser( )
+    def __init__( self, parsed_key ) :
+        assert KeyLineParser.IsParsedKey( parsed_key )
+        self._parsed_key = parsed_key
+
+    @classmethod
+    def ParseLine( cls, line, username=None, key_type=None ) :
+        try :
+            parsed = cls._parser.ParseKeyLine( line )
+        except KeyParseError :
+            raise
+        if username is not None  and  parsed.User != username :
+            raise KeyMismatch( 'user-name mismatch ("%s" != "%s")' % (username, parsed.User) )
+        elif key_type is not None  and  parsed.KeyType != key_type :
+            raise KeyMismatch( 'key-type mismatch ("%s" != "%s")' % (key_type, parsed.KeyType) )
+        else :
+            return parsed
+
+    @classmethod
+    def CreateFromLine( cls, line, username=None, key_type=None ) :
+        try :
+            parsed = cls.ParseLine( line, username, key_type )
+        except PubKeyError as e:
+            print >>sys.stderr, 'Ignoring public key line "'+line.rstrip()+'":', str(e)
+            return None
+        return cls( parsed )
+
+    Owner    = property( lambda self : self._parsed_key.Owner )
+    Host     = property( lambda self : self._parsed_key.Host )
+    UserName = property( lambda self : self._parsed_key.User )
+    Identity = property( lambda self : self._parsed_key.Identity )
+    PubKey   = property( lambda self : self._parsed_key.Key )
+    KeyType  = property( lambda self : self._parsed_key.KeyType )
+    Text     = property( lambda self : self._parsed_key.Line )
+
+
+class SshKeyList( object ) :
+    def __init__( self ) :
+        self._keys = { }
+
+    def Clear( self, fn=None ) :
+        for dict_key, key in self._keys.items( ) :
+            if fn is None  or  fn(key) :
+                del self._keys[dict_key]
+        return len(self._keys)
+
+    def AddKey( self, key ) :
+        assert isinstance(key, SshPublicKey)
+        dict_key = (key.UserName, key.KeyType)
+        if dict_key in self._keys :
+            raise DuplicateKey
+        else :
+            self._keys[dict_key] = key
+
+    def HaveKey( self, key ) :
+        assert isinstance(key, SshPublicKey)
+        dict_key = (key.UserName, key.KeyType)
+        return dict_key in self._keys
+
+    def ImportLine( self, line ) :
+        try :
+            key = SshPublicKey.CreateFromLine( line.rstrip() )
+            self.AddKey( key )
+        except KeyParseError :
+            raise
+
+    def ImportText( self, text, max_keys=None ) :
+        for n,line in enumerate(text.splitlines(False)) :
+            if max_keys is not None  and  n >= max_keys :
+                return
+            try :
+                self.ImportLine( line )
+            except KeyParseError :
+                next
+
+    def GetKeys( self, fn=None ) :
+        for key in self._keys.values() :
+            if fn is None  or  fn(key) :
+                yield key
+        return
+
+    def NumKeys( self, fn=None ) :
+        count = 0
+        for key in self._keys.values() :
+            if fn is None  or  fn(key) :
+                count += 1
+        return count
+
+
+class SshPublicKeyFile( SshKeyList ) :
+    def __init__( self, user ) :
+        SshKeyList.__init__( self )
+        self._user = user
+
+    def Import( self, key_type="rsa" ) :
+        path = os.path.join( self._user.PublicSsh, "id_"+key_type+".pub" )
+        cmd = ( "su", self._user.UserName, "-c", "cat "+path )
+        print "Runing:", cmd
+        output = subprocess.check_output( cmd )
+        try :
+            line = output.splitlines(False)[0].strip()
+            self.ImportLine( line )
+        except KeyParseError as e :
+            print >>sys.stderr, 'Failed to import public key from "'+path+'":', e
+            raise KeyImportError
+
+
+class SshAuthKeys( SshKeyList ) :
+    def __init__( self, user ) :
+        SshKeyList.__init__( self )
+        self._user = user
+        self._path = os.path.join( user.LocalSsh, "authorized_keys" )
+        self._add_keys = SshKeyList( )
+
+    def ReadKeysFile( self, keytype="rsa" ) :
+        try :
+            f = open(self._path)
+            for n,line in enumerate(f.readlines()) :
+                try :
+                    self.ImportLine( line )
+                except KeyParseError as e :
+                    print >>sys.stderr, 'Failed to import authorized key line', n, \
+                        'from "'+self._path+'":', e
+            f.close()
+        except IOError as e :
+            pass
+
+    def AddKey( self, key ) :
+        if not self.HaveKey( key ) :
+            try :
+                self._add_keys.AddKey( key )
+            except DuplicateKey :
+                pass
+
+    def AddKeys( self, keylist, fn=None ) :
+        for key in keylist.Getkeys( fn ) :
+            if not self.HaveKey( key ) :
+                self._add_keys.AddKey( key )
+
+    def UpdateKeysFile( self ) :
+        if self._add_keys.NumKeys( ) == 0 :
+            return
+        new_file = self.NumKeys( ) == 0
+        try :
+            f = open(self._path, 'a')
+            for key in self._add_keys.GetKeys( ) :
+                print >>f, key.Text
+                self.AddKey( key )
+            f.close()
+            self._add_keys.Clear( )
+            if new_file :
+                self._user.Chown( self._path )
+        except IOError as e :
+            print >>sys.stderr, 'Failed to add public keys to "'+path+'":', e
+            raise
+
+
+class User( object ) :
+    __cache = { }
+    __nfs_homes = None
+    @classmethod
+    def SetNfsHomes( cls, homes ) :
+        cls.__nfs_homes = homes
+    @classmethod
+    def __GetPublicHome( cls, username ) :
+        assert cls.__nfs_homes is not None
+        return cls.__nfs_homes[username]
+
+    @staticmethod
+    def _GetSshDir( home ) :
+        return os.path.join( home, ".ssh" )
+
+    def __init__( self, user_name ) :
+        self._user_name = user_name
+        pwent = pwd.getpwnam(user_name)
+        self._local_home = pwent.pw_dir
+        self._uid = pwent.pw_uid
+        self._gid = pwent.pw_gid
+        self._local_ssh = self._GetSshDir( self._local_home )
+        try :
+            self._pub_home = self.__GetPublicHome( user_name )
+            self._pub_ssh  = self._GetSshDir( self._pub_home )
+        except KeyError :
+            self._pub_home = self._local_home
+            self._pub_ssh = self._local_ssh
+        self._public_keys = SshKeyList( )
+        self._auth_keys = SshAuthKeys( self )
+
+    def Chown( self, path ) :
+        os.chown( path, self.Uid, self.Gid )
+
+    def ChownDirs( self, group, paths ) :
+        if group is None :
+            group = self.Gid
+        cmd = [ "/bin/chown", "-R", self._user_name+":"+str(group) ]
+        cmd += list(paths)
+        print "Executing", cmd
+        subprocess.call( cmd )
+
+    def ChownDir( self, group, path ) :
+        self.ChownDirs( group, (path,) )
+
+    def SetupHomeDir( self ) :
+        if not os.path.exists( self.LocalHome ) :
+            os.makedirs( self.LocalHome )
+
+    def Finished( self ) :
+        self.ChownDir( None, self._local_home )
+
+    def CreateSymLinks( self, other, names ) :
+        assert type(other) == User
+        assert type(names) in (list, tuple)
+        for name in names :
+            path = os.path.join( self._local_home, name )
+            ref = os.path.join( other.PublicHome, name )
+            if not os.path.exists( path ) :
+                if not os.path.exists( ref ) :
+                    print >>sys.stderr, "Reference file/directory", ref, "does not exist!"
+                else :
+                    os.symlink( ref, path )
+
+    def ReadAuthorizedKeys( self ) :
+        self._auth_keys.ReadKeysFile( )
+
+    def AddAuthorizedKey( self, key ) :
+        self._auth_keys.AddKey( key )
+
+    def AddAuthorizedKeys( self, keylist, fn=None ) :
+        self._auth_keys.AddKeys( keylist, fn )
+
+    def UpdateAuthorizedKeys( self ) :
+        self._auth_keys.UpdateKeysFile( )
+
+    def ReadPublicKeys( self, key_types=None ) :
+        if key_types is None :
+            key_types = ( "rsa", )
+        for key_type in key_types :
+            f = SshPublicKeyFile( self )
+            try :
+                f.Import( key_type )
+                for key in f.GetKeys( ) :
+                    self._public_keys.AddKey( key )
+            except KeyImportError :
+                pass
+        return self._public_keys.NumKeys( )
+
+    def PublicKeys( self, fn=None ) :
+        return self._public_keys.GetKeys( fn )
+
+    UserName    = property( lambda self : self._user_name )
+    Uid         = property( lambda self : self._uid )
+    Gid         = property( lambda self : self._gid )
+    LocalHome   = property( lambda self : self._local_home )
+    LocalSsh    = property( lambda self : self._local_ssh )
+    PublicHome  = property( lambda self : self._pub_home )
+    PublicSsh   = property( lambda self : self._pub_ssh )
+
+    @classmethod
+    def LookUp( cls, username ) :
+        try :
+            return cls.__cache[username]
+        except KeyError :
+            user = cls( username )
+            cls.__cache[username] = user
+            return user
+
+class _Parser( object ) :
+    _parts = {
+        'setup_homes' : {
+            "arg"     : 'setup-homes',
+            "default" : True,
+            "help"    : "Setup root and user directories",
+        },
+        'setup_build' : {
+            "arg"     : 'setup-build',
+            "default" : True,
+            "help"    : "Setup build tree",
+        },
+        'extract' : {
+            "arg"     : 'extract',
+            "default" : True,
+            "help"    : "Extract archives",
+        },
+    }
+
+    def __init__( self ) :
+        self._parser = argparse.ArgumentParser(
+            description="Program to install IronBee on a VM host",
+            prog="ib-appliance-install" )
+
+        self._parser.add_argument( "--user",
+                                   action="store", dest="user", default="nick",
+                                   help='Specify user to setup <default:nick>' )
+
+        self._parser.set_defaults( nfs_homes={ "nick":"/home/nick" } )
+        class NfsHomeAction(argparse.Action):
+            def __call__(self, parser, namespace, values, option_string=None):
+                namespace.nfs_homes[values[0]] = values[1]
+        self._parser.add_argument( "--nfs-home", action=NfsHomeAction, nargs=2,
+                                   help='Specify NFS home directory "--home <user> <directory>"' )
+        self._parser.add_argument( "--ref-user",
+                                   action="store", dest="ref_user", default="nick",
+                                   help='Specify reference user <default:nick>' )
+
+        default = "0.11"
+        self._parser.add_argument( "ib_version", default=default,
+                                   help="IronBee version to install <"+default+">" )
+
+        arch = platform.linux_distribution()[2]
+        self._parser.add_argument( "--arch",
+                                   action="store", dest="arch", default=arch,
+                                   help="Specify architector to use <"+arch+">" )
+        self._parser.add_argument( "--timestamp",
+                                   action="store", dest="timestamp", default=None,
+                                   help='Specify timestamp of archives <default:None>' )
+
+        self._parser.add_argument( "--branch",
+                                   action="store", dest="arch", default=arch,
+                                   help="Specify architector to use <"+arch+">" )
+        class PartsAction(argparse.Action):
+            def __call__(self, parser, namespace, values, option_string=None):
+                if option_string.startswith( "--only-" ) :
+                    only = True
+                    value = True
+                    arg = option_string[7:]
+                elif option_string.startswith( "--no-" ) :
+                    value = False
+                    only = False
+                    arg = option_string[5:]
+                else :
+                    value = True
+                    only = False
+                    arg = option_string[2:]
+
+                for name,part in _Parser._parts.items( ) :
+                    if arg == part['arg'] :
+                        vars(namespace)[name] = value
+                        for other in _Parser._parts.keys() :
+                            if other != name  and  only :
+                                vars(namespace)[other] = False
+
+        for name,part in _Parser._parts.items( ) :
+            arg = part['arg']
+            default = part['default']
+            help = part['help'] + ' <default=' + ('Yes' if default else 'No') + '>'
+            self._parser.add_argument( '--'+arg,
+                                       action=PartsAction, dest=name, default=default, nargs=0,
+                                       help=help.capitalize() )
+            self._parser.add_argument( '--no-'+arg,
+                                       action=PartsAction, dest=name, nargs=0,
+                                       help=('Do not '+help).capitalize() )
+            self._parser.add_argument( '--only-'+arg,
+                                       action=PartsAction, dest=name, nargs=0,
+                                       help=('Only '+help).capitalize() )
+        
+        self._parser.add_argument( "--execute",
+                                   action="store_true", dest="execute", default=True,
+                                   help="Enable execution <default=yes>" )
+        self._parser.add_argument( "-n", "--no-execute",
+                                   action="store_false", dest="execute",
+                                   help="Disable execution (for test/debug)" )
+        self._parser.add_argument( "-v", "--verbose",
+                                   action="count", dest="verbose", default=0,
+                                   help="Increment verbosity level" )
+        self._parser.add_argument( "-q", "--quiet",
+                                   action="store_true", dest="quiet", default=False,
+                                   help="be vewwy quiet (I'm hunting wabbits)" )
+
+    def ParseCmdLine( self ) :
+        self._args = self._parser.parse_args()
+        if not self._args.execute  and  self._args.verbose == 0  and  not self._args.quiet :
+            self._verbose = 1
+        return self._args
+
+class _Main( object ) :
+
+    def __init__( self ) :
+        self._parser = _Parser( )
+
+    def _ParseCmdLine( self ) :
+        self._args = self._parser.ParseCmdLine( )
+
+    Execute = property( lambda self : self._args.execute )
+    Verbose = property( lambda self : self._args.verbose )
+    Quiet   = property( lambda self : self._args.quiet )
+
+    def _SetupSsh( self, user, ref_user ) :
+        home = user.LocalHome
+        ssh = os.path.join(home, ".ssh")
+        if not os.path.isdir( ssh ) :
+            os.makedirs( ssh, 0700 )
+        user.ReadAuthorizedKeys( )
+        for key in ref_user.PublicKeys( ) :
+            user.AddAuthorizedKey( key )
+        user.UpdateAuthorizedKeys( )
+
+    _symlist = (".bashrc", ".profile", ".alias", ".setenvrc", ".toprc", "bin", "devel", "tmp")
+    def _SetupUserHome( self, user_name, ref_name ) :
+        ref_user = User.LookUp( ref_name )
+        if ref_user.ReadPublicKeys() == 0 :
+            print >>sys.stderr, "No public key found for reference user", ref_name
+            sys.exit(1)
+
+        user = User.LookUp( user_name )
+        user.SetupHomeDir( )
+        self._SetupSsh( user, ref_user )
+        user.CreateSymLinks( ref_user, self._symlist )
+        user.ChownDir( None, user.LocalHome )
+
+    def _SetupRootHome( self, ref_name ) :
+        ref_user = User.LookUp( ref_name )
+        root = User.LookUp( "root" )
+        self._SetupSsh( root, ref_user )
+
+    def _SearchFile( self, path, string ) :
+        try :
+            fp = open( path )
+            for line in fp :
+                if string in line :
+                    return True
+            else :
+                return False
+        except IOError :
+            return False
+
+    def _AppendFile( self, path, string ) :
+        try :
+            fp = open( path, "a" )
+            print >>fp, string
+            fp.close( )
+        except IOError as e :
+            print "Failed to append to file", path, ":", e
+
+    def _SetupBuildDirs( self, user_name ) :
+        # Create and mount /build
+        print "Creating /build"
+        for path in ( "/build", "/local/build" ) :
+            if not os.path.exists( path ) :
+                os.makedirs( path )
+        if not self._SearchFile( "/etc/fstab", "/build" ) :
+            self._AppendFile( "/etc/fstab", "/local/build       /build    none    bind    0 0" )
+        if not self._SearchFile( "/proc/mounts", "/build" ) :
+            cmd = [ "/bin/mount", "/build" ]
+            subprocess.call( cmd )
+
+    def _ArchivePath( self, name, name2, timestamp ) :
+        ib = User.LookUp( "ironbee" )
+        if name2 is None :
+            archive_name = '%s-%s-%s.tar.gz' % ( name, self._args.arch, timestamp )
+        else :
+            archive_name = '%s-ib_%s-%s-%s.tar.gz' % ( name, name2, self._args.arch, timestamp )
+        return os.path.join( ib.PublicHome, 'data', archive_name )
+
+    def _PopulateDirectories( self, timestamp, names, user_name, group=None ) :
+        user = User.LookUp( user_name )
+        for name in names :
+            dirpath = os.path.join( "/", name, "qualys" )
+            if not os.path.exists( dirpath ) :
+                os.makedirs( dirpath )
+                user.ChownDir( "qualys", dirpath )
+            if "build" in name :
+                tarball = self._ArchivePath( name, self._args.ib_version, timestamp )
+            else :
+                tarball = self._ArchivePath( name, None, timestamp )
+            cmd = ( "/bin/tar", "xf", tarball )
+            print "Populating", dirpath, ":", cmd
+            if self.Execute :
+                subprocess.call( cmd, cwd=dirpath )
+
+    def _SelectArchive( self ) :
+        regex = re.compile( r'-(\d{6}_\d{6})' )
+        if self._args.timestamp is not None :
+            return self._args.timestamp
+        
+        latest = None
+        rval = None
+        for archive in glob.glob( self._ArchivePath('*', self._args.ib_version, '*') ) :
+            match = regex.search( archive )
+            if match is None :
+                print "No archives found!"
+                sys.exit(1)
+            timestamp = time.strptime( match.group(1), '%y%m%d_%H%M%S' )
+            if latest is None  or  timestamp > latest :
+                latest = timestamp
+                rval = match.group(1)
+        return rval
+
+    def Main( self ) :
+        self._ParseCmdLine( )
+        if os.geteuid() != 0  and  ( self._args.setup_homes or self._args.setup_build ) :
+            print >>sys.stderr, "This program needs to be run by root"
+            sys.exit( 1 )
+        User.SetNfsHomes( self._args.nfs_homes )
+        if self._args.setup_homes :
+            self._SetupUserHome( self._args.user, self._args.ref_user )
+            self._SetupRootHome( self._args.ref_user )
+        if self._args.setup_build :
+            self._SetupBuildDirs( self._args.user )
+        timestamp = self._SelectArchive( )
+        if self._args.extract :
+            self._PopulateDirectories( timestamp, ("build", "local"), self._args.user, "qualys" )
+
+
+main = _Main( )
+main.Main( )
+
+### Local Variables: ***
+### py-indent-offset:4 ***
+### python-indent:4 ***
+### python-continuation-offset:4 ***
+### tab-width:4  ***
+### End: ***

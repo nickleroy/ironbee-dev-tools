@@ -1,0 +1,4 @@
+#! /bin/sh
+umount /build
+rm -fr /build
+rm -fr /local/home/ /local/qualys/ /local/build
