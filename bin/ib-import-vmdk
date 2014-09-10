@@ -1,0 +1,119 @@
+#! /usr/bin/env python
+###########################################################################
+##
+## Copyright(c) 2014 by Nick LeRoy, 310 Jones Ave, Fort Atkinson, WI
+##
+## This program is free software: you can redistribute it and/or modify
+## it under the terms of the GNU General Public License as published by
+## the Free Software Foundation, either version 3 of the License, or
+## (at your option) any later version.
+## 
+## This program is distributed in the hope that it will be useful,
+## but WITHOUT ANY WARRANTY; without even the implied warranty of
+## MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+## GNU General Public License for more details.
+## 
+## You should have received a copy of the GNU General Public License
+## along with this program.  If not, see <http://www.gnu.org/licenses/>.
+##
+###########################################################################
+import re
+import os
+import sys
+import subprocess
+import argparse
+import platform
+
+class _Main( object ) :
+    def __init__( self ) :
+        self._parser = argparse.ArgumentParser(
+            description="Program to import VMDK images into QCOW2 format",
+            prog="import-vmdk" )
+
+    def _ParserSetup( self ) :
+        arch = platform.linux_distribution()[2]
+        os = '_'.join(platform.linux_distribution()[:2]).replace(' ', '')
+        bits = int(platform.architecture()[0].replace('bit', ''))
+        host = platform.node()
+
+        self._parser.add_argument( "version", type=str,
+                                   help="Version of image to import" )
+        self._parser.add_argument( "vm", type=int,
+                                   help="# of VM to import into" )
+
+        self._parser.add_argument( "--arch", type=str, default=arch,
+                                   help="Specify alternate architecture <default={:s}>".format(arch) )
+        self._parser.add_argument( "--os", type=str, default=os,
+                                   help="Specify alternate OS <default={:s}>".format(os) )
+        self._parser.add_argument( "--bits", type=int, default=bits,
+                                   help="Specify alternate bits <default={:d}>".format(bits) )
+        self._parser.add_argument( "--host", type=str, default=None,
+                                   help="Specify alternate OS <default={:s}-vmnn>".format(host) )
+
+        self._parser.add_argument( "--execute",
+                                   action="store_true", dest="execute", default=True,
+                                   help="Enable execution <default>" )
+        self._parser.add_argument( "-n", "--no-execute",
+                                   action="store_false", dest="execute",
+                                   help="Disable execution (for test/debug)" )
+        self._parser.add_argument( "-v", "--verbose",
+                                   action="count", dest="verbose", default=0,
+                                   help="Increment verbosity level" )
+        self._parser.add_argument( "-q", "--quiet",
+                                   action="store_true", dest="quiet", default=False,
+                                   help="be vewwy quiet (I'm hunting wabbits)" )
+
+
+    def _ParseCmdline( self ) :
+        self._args = self._parser.parse_args()
+        if not self._args.execute  and  self._args.verbose == 0  and  not self._args.quiet :
+            self._verbose = 1
+        if self._args.host is None :
+            self._args.host = '{:s}-vm{:02d}'.format( platform.node(), self._args.vm )
+
+    Version = property( lambda self : self._args.version )
+    VM      = property( lambda self : self._args.vm )
+
+    Arch    = property( lambda self : self._args.arch )
+    OS      = property( lambda self : self._args.os )
+    Bits    = property( lambda self : self._args.bits )
+    Host    = property( lambda self : self._args.host )
+
+    Execute = property( lambda self : self._args.execute )
+    Verbose = property( lambda self : self._args.verbose )
+    Quiet   = property( lambda self : self._args.quiet )
+
+    def _Import( self ) :
+        base = '/local/disks'
+        inpath = os.path.join(
+            base,
+            'images',
+            'home-qualys-{:d}'.format(self.Bits),
+            self.Version,
+            '{:s}_homequalys{:d}-{:s}'.format(self.OS, self.Bits, self.Version),
+            '{:s}_homequalys{:d}.{:s}-{:s}-disk1.vmdk'.format(
+                self.OS, self.Bits, self.Arch, self.Version)
+        )
+        outpath = os.path.join( base, self.Host, 'disk00.qcow2' )
+        if not os.path.exists( inpath ) :
+            self._parser.error( 'Path for VMDK image "{:s}" does not exist'.format(inpath) )
+        cmd = ('qemu-img', 'convert', '-O', 'qcow2', inpath, outpath )
+        if self.Verbose :
+            print "Executing:", cmd
+        if self.Execute :
+            subprocess.call( cmd )
+        
+    def Main( self ) :
+        self._ParserSetup( )
+        self._ParseCmdline( )
+        self._Import( )
+
+main = _Main( )
+main.Main( )
+
+### Local Variables: ***
+### py-indent-offset:4 ***
+### python-indent:4 ***
+### python-continuation-offset:4 ***
+### tab-width:4  ***
+### End: ***

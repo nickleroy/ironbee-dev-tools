@@ -192,6 +192,7 @@ class _Main( object ) :
                              ('*.log', '*.blog', 'log/httpd/*', '*.lock', '*.meta',
                               'data', 'crashes/*', 'tmp/*', '*.db') )
         self._CreateArchive( 'local', None, '/local/qualys/tmp/qualys', ('.',) )
+        self._CreateArchive( 'etc.in', None, os.environ['QLYS_DEVEL'], ('etc.in',) )
         if self._args.remove_old :
             self._RemoveOldArchives( )
         if not self.Quiet :

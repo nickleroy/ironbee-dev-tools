@@ -190,6 +190,7 @@ class IbToolMain( object ) :
         "LogFiles"      : "${LogDir}/*",
         "Etc"           : os.environ.get("QLYS_ETC", "${Devel}/etc"),
         "EtcIn"         : os.environ.get("QLYS_ETC_IN", "${Devel}/etc.in"),
+        "Tmp"           : os.environ["QLYS_TMP"],
         "MakeArgs"      : [ ],
         "Cmd"           : [ "${Executable}", "${Args}" ],
         "IbInstall"     : os.environ["IB_INSTALL"],
@@ -355,6 +356,10 @@ class IbToolMain( object ) :
                                    action="store_const", dest="output",
                                    const="${DefaultOut}",
                                    help="Use default stdout file" )
+
+        self._parser.add_argument( "--tmp",
+                                   action="store_true", dest="tmp", default=False,
+                                   help='Change to $QLYS_TMP directory before starting')
 
         self._parser.add_argument( "--clear-logs", "-c",
                                    action="store_true", dest="clear_logs", default=False,
@@ -704,6 +709,8 @@ class IbToolMain( object ) :
         self.Parse( )
         self.PostParse( )
         self.DumpTable( )
+        if self._args.tmp :
+            os.chdir( self._defs.Lookup("Tmp") )
         self.RunPre( )
         self.RunProgram( )
 
