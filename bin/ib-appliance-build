@@ -94,6 +94,10 @@ class _Main( object ) :
         self._parser.add_argument( "--ib-version",
                                    action="store", dest="ib_version", default=None,
                                    help="Specify IronBee version to use <auto>" )
+
+        self._parser.add_argument( "--branch",
+                                   action="store", dest="branch", default=None,
+                                   help="Specify git branch to use <none>" )
         
         self._parser.add_argument( "--gcc-version",
                                    action="store", dest="gcc_version", default=None,
@@ -218,8 +222,11 @@ class _Main( object ) :
         if version is None :
             print >> sys.stderr, "Unable to detect IronBee version!"
             sys.exit(1)
-        print version, version.Major, version.Minor, version.Release
-        return '%s.%s.%s' % (version.Major, version.Minor, version.Release)
+        if self._args.branch is None :
+            return '%s.%s.%s' % (version.Major, version.Minor, version.Release)
+        else :
+            branch = self._args.branch.replace('-', '_').replace('/', '_')
+            return '%s.%s.%s:%s' % (version.Major, version.Minor, version.Release, branch)
 
     def Main( self ) :
         self._ParseCmdline( )

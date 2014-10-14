@@ -74,10 +74,10 @@ class _Parser( object ) :
         self._parser.add_argument( "--timestamp",
                                    action="store", dest="timestamp", default=None,
                                    help='Specify timestamp of archives <default:None>' )
-
         self._parser.add_argument( "--branch",
-                                   action="store", dest="arch", default=arch,
-                                   help="Specify architector to use <"+arch+">" )
+                                   action="store", dest="branch", default=None,
+                                   help="Specify git branch to use <None>" )
+
         class PartsAction(argparse.Action):
             def __call__(self, parser, namespace, values, option_string=None):
                 if option_string in ("--enable-all", "--init") :
@@ -325,7 +325,12 @@ class _Main( object ) :
             print >>sys.stderr, 'Error extracting from tarvall "%s": %s' % ( tarball, e )
 
     def _SelectArchive( self ) :
-        regex = re.compile( r'ib_([\d\.]+)-\w+-(\d{6}_\d{6})' )
+        if self._args.branch is None :
+            branch = None
+            regex = re.compile( r'ib_([\d\.]+)-\w+-(\d{6}_\d{6})' )
+        else :
+            branch = self._args.branch.replace('-', '_').replace('/', '_')
+            regex = re.compile( r'ib_([\d\.]+:\w+)-\w+-(\d{6}_\d{6})' )
         if self._args.timestamp is not None :
             return self._args.ib_version, self._args.timestamp
 
@@ -335,7 +340,10 @@ class _Main( object ) :
             vpat = self._args.ib_version
         else :
             print >>sys.stderr, 'Invalid version string "%s"' % ( self._args.ib_version )
-            
+        if self._args.branch is not None :
+            vpat += ':'+branch
+        print regex.pattern, vpat, self._ArchivePath('*', vpat, '*')
+
         latest = None
         timestr = None
         version = None
