@@ -26,22 +26,25 @@ import subprocess
 import argparse
 import platform
 import time
+import shutil
+import tarfile
+import stat
 
 class _Parser( object ) :
     _parts = {
         'setup_homes' : {
             "arg"     : 'setup-homes',
-            "default" : True,
+            "default" : False,
             "help"    : "Setup root and user directories",
         },
         'setup_build' : {
             "arg"     : 'setup-build',
-            "default" : True,
+            "default" : False,
             "help"    : "Setup build tree",
         },
         'setup_swap' : {
             "arg"     : 'setup-swap',
-            "default" : True,
+            "default" : False,
             "help"    : "Setup swap space",
         },
         'extract' : {
@@ -77,10 +80,14 @@ class _Parser( object ) :
                                    help="Specify architector to use <"+arch+">" )
         class PartsAction(argparse.Action):
             def __call__(self, parser, namespace, values, option_string=None):
-                if option_string.startswith( "--only-" ) :
+                if option_string in ("--enable-all", "--init") :
+                    only = False
+                    value = True
+                    arg = None
+                elif option_string.endswith( "-only" ) :
                     only = True
                     value = True
-                    arg = option_string[7:]
+                    arg = option_string[2:-5]
                 elif option_string.startswith( "--no-" ) :
                     value = False
                     only = False
@@ -91,25 +98,29 @@ class _Parser( object ) :
                     arg = option_string[2:]
 
                 for name,part in _Parser._parts.items( ) :
-                    if arg == part['arg'] :
+                    if arg is None  or  arg == part['arg'] :
                         vars(namespace)[name] = value
                         for other in _Parser._parts.keys() :
                             if other != name  and  only :
                                 vars(namespace)[other] = False
 
+        group = self._parser.add_argument_group( 'Mode', 'Enable for modes of operation' )
         for name,part in _Parser._parts.items( ) :
             arg = part['arg']
             default = part['default']
             help = part['help'] + ' <default=' + ('Yes' if default else 'No') + '>'
-            self._parser.add_argument( '--'+arg,
-                                       action=PartsAction, dest=name, default=default, nargs=0,
-                                       help=help.capitalize() )
-            self._parser.add_argument( '--no-'+arg,
-                                       action=PartsAction, dest=name, nargs=0,
-                                       help=('Do not '+help).capitalize() )
-            self._parser.add_argument( '--only-'+arg,
-                                       action=PartsAction, dest=name, nargs=0,
-                                       help=('Only '+help).capitalize() )
+            group.add_argument( '--'+arg,
+                                action=PartsAction, default=default, nargs=0,
+                                help=help.capitalize() )
+            group.add_argument( '--no-'+arg,
+                                action=PartsAction, nargs=0,
+                                help=('Do not '+help).capitalize() )
+            group.add_argument( '--'+arg+'-only',
+                                action=PartsAction, nargs=0,
+                                help=('Only '+help).capitalize() )
+        group.add_argument( '--enable-all', '--init',
+                            action=PartsAction, nargs=0,
+                            help='Enable all actions' )
         
         self._parser.add_argument( "--execute",
                                    action="store_true", dest="execute", default=True,
@@ -256,60 +267,129 @@ class _Main( object ) :
             archive_name = '%s-ib_%s-%s-%s.tar.gz' % ( name, name2, self._args.arch, timestamp )
         return os.path.join( ib.Home, 'data', archive_name )
 
-    def _PopulateDirectories( self, timestamp, archives, user_name, group=None ) :
+    def _WipeDirs( self, dirpath, dirs ) :
+        assert type(dirpath) == str
+        assert type(dirs) in (list, tuple, set)
+        for name in dirs :
+            fullpath = os.path.join( dirpath, name )
+            if os.path.exists( fullpath ) :
+                for root, ldirs, lfiles in os.walk( fullpath ) :
+                    for f in lfiles :
+                        fp = os.path.join(root,f)
+                        if os.path.islink( fp ) :
+                            pass
+                        elif not os.access( fp, os.W_OK ) :
+                            os.chmod( fp, stat.S_IRUSR | stat.S_IWUSR )
+                    for f in ldirs :
+                        fp = os.path.join(root,f)
+                        if os.path.islink( fp ) :
+                            pass
+                        elif not os.access( fp, os.W_OK ) :
+                            os.chmod( fp, stat.S_IRWXU )
+                shutil.rmtree( fullpath )
+
+    def _PopulateDirectory( self, ib_version, timestamp, name, dirpath, user_name, group=None, wipe=False ) :
         user = User.LookUp( user_name )
-        for name,dirpath in archives.items() :
-            if not os.path.exists( dirpath ) :
-                os.makedirs( dirpath )
-                user.ChownDir( "qualys", dirpath )
-            if "build" in name :
-                tarball = self._ArchivePath( name, self._args.ib_version, timestamp )
-            else :
-                tarball = self._ArchivePath( name, None, timestamp )
-            cmd = ( "/bin/tar", "xf", tarball )
-            print "Populating", dirpath, ":", cmd
+        if not os.path.exists( dirpath ) :
+            os.makedirs( dirpath )
+            user.ChownDir( "qualys", dirpath )
+        tarball = self._ArchivePath( name, ib_version, timestamp )
+        if not os.path.isfile( tarball ) :
+            print >>sys.stderr, "Archive", tarball, "doesn not exist"
+            sys.exit(1)
+        try :
+            print "Populating", dirpath, "from", tarball
+            regex = re.compile( r'(\.?/)?([^\/]+)/' )
+            tar = tarfile.open( tarball )
+            top = set()
+            for member in tar.getmembers() :
+                if member.name.startswith("/") :
+                    print >>sys.stderr, 'Archive', fullpath, 'has fully qualified path! "%s"' % (member.name)
+                    sys.exit(1)
+                m = regex.match( member.name )
+                if m is not None :
+                    top.add( m.group(2) )
             if self.Execute :
-                subprocess.call( cmd, cwd=dirpath )
+                if wipe is None or wipe == False :
+                    pass
+                elif wipe == True :
+                    self._WipeDirs( dirpath, top )
+                elif type(wipe) in (list, tuple) :
+                    self._WipeDirs( dirpath, wipe )
+                else :
+                    assert False, str(wipe)
+                tar.extractall( path=dirpath )
+                if os.geteuid() == 0 :
+                    user.ChownDir( "qualys", dirpath )
+        except tarfile.TarError as e :
+            print >>sys.stderr, 'Error extracting from tarvall "%s": %s' % ( tarball, e )
 
     def _SelectArchive( self ) :
-        regex = re.compile( r'-(\d{6}_\d{6})' )
+        regex = re.compile( r'ib_([\d\.]+)-\w+-(\d{6}_\d{6})' )
         if self._args.timestamp is not None :
-            return self._args.timestamp
-        
+            return self._args.ib_version, self._args.timestamp
+
+        if self._args.ib_version.count('.') == 1 :
+            vpat = self._args.ib_version+'.*'
+        elif self._args.ib_version.count('.') == 2 :
+            vpat = self._args.ib_version
+        else :
+            print >>sys.stderr, 'Invalid version string "%s"' % ( self._args.ib_version )
+            
         latest = None
-        rval = None
-        for archive in glob.glob( self._ArchivePath('*', self._args.ib_version, '*') ) :
+        timestr = None
+        version = None
+        for archive in glob.glob( self._ArchivePath('*', vpat, '*') ) :
             match = regex.search( archive )
             if match is None :
                 print "No archives found!"
                 sys.exit(1)
-            timestamp = time.strptime( match.group(1), '%y%m%d_%H%M%S' )
+            timestamp = time.strptime( match.group(2), '%y%m%d_%H%M%S' )
             if latest is None  or  timestamp > latest :
                 latest = timestamp
-                rval = match.group(1)
-        return rval
+                version = match.group(1)
+                timestr = match.group(2)
+        return version,timestr
 
     def Main( self ) :
         self._ParseCmdLine( )
-        if os.geteuid() != 0  and  ( self._args.setup_homes or self._args.setup_build ) :
-            print >>sys.stderr, "This program needs to be run by root"
-            sys.exit( 1 )
+        if os.geteuid() != 0 :
+            table = {
+                'setup-homes' : self._args.setup_homes,
+                'setup-build' : self._args.setup_build,
+                'setup-swap' : self._args.setup_swap,
+            }
+            errors = []
+            for n,v in table.items( ) :
+                if v :
+                    errors.append( n )
+            if len(errors) :
+                print >>sys.stderr, "This program needs to be run by root to perform selected operations:"
+                for e in errors :
+                    print >>sys.stderr, '\t'+e
+                sys.exit( 1 )
         if self._args.setup_swap :
             self._SetupSwap( )
         if self._args.setup_homes :
             self._SetupHomes( )
         if self._args.setup_build :
             self._SetupBuildDirs( self._args.user )
-        timestamp = self._SelectArchive( )
+        version, timestamp = self._SelectArchive( )
+        if version is None or timestamp is None :
+            if timestamp is None :
+                print >>sys.stderr, "No archives matching IronBee", self._args.ib_version, "found"
+            else :
+                print >>sys.stderr, "No archives matching IronBee", self._args.ib_version, self._args.timestamp, "found"
+            sys.exit( 1 )
         if self._args.extract :
-            self._PopulateDirectories( timestamp,
-                                       {
-                                           "build": "/build/qualys",
-                                           "local": "/local/qualys",
-                                           "etc.in": "/local/qualys",
-                                       },
-                                       self._args.user, "qualys" )
-
+            self._PopulateDirectory( version, timestamp, "build", "/build/qualys", self._args.user, "qualys", wipe=True )
+            self._PopulateDirectory( None, timestamp, "local", "/local/qualys", self._args.user, "qualys",
+                                     wipe=('opt', 'share', 'etc', 'etc.in') )
+            self._PopulateDirectory( None, timestamp, "etc.in", "/local/qualys", self._args.user, "qualys", wipe=True )
+            etc = "/local/qualys/etc"
+            if os.path.exists( etc ) :
+                shutil.rmtree( etc )
+            os.makedirs( etc )
 
 main = _Main( )
 main.Main( )

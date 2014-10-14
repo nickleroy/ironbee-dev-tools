@@ -27,6 +27,46 @@ import time
 import glob
 import ibversion
 
+class _BaseRule( object ) :
+    def __init__( self, _type, pattern ) :
+        assert type(_type) == str
+        assert type(pattern) == str
+        assert _type in ( 'include', 'exclude' )
+        self._type = _type
+        self._pattern = pattern
+    def __str__( self ) :
+        return '--'+self._type+'='+self._pattern
+
+class _IncludeRule( _BaseRule ) :
+    def __init__( self, pattern ) :
+        _BaseRule.__init__( self, 'include', pattern )
+
+class _ExcludeRule( _BaseRule ) :
+    def __init__( self, pattern ) :
+        _BaseRule.__init__( self, 'exclude', pattern )
+
+class _RuleSet( object ) :
+    def __init__( self, name=None, rules=None ) :
+        assert name is None or type(name) == str
+        assert rules is None or type(rules) in (list, tuple)
+        self._rules = []
+        if rules is not None :
+            self.AddRules( rules )
+
+    def AddRules( self, rules ):
+        assert type(rules) in (list, tuple)
+        for rule in rules :
+            self.AddRule( rule )
+
+    def AddRule( self, rule ) :
+        assert isinstance(rule, _BaseRule)
+        self._rules.append(rule)
+
+    def GetRules( self ) :
+        return tuple( [ str(rule) for rule in self._rules ] )
+    Rules = property( GetRules )
+    
+
 class _Main( object ) :
     def __init__( self ) :
         self._parser = argparse.ArgumentParser(
@@ -43,9 +83,6 @@ class _Main( object ) :
         self._parser.add_argument( "--arch",
                                    action="store", dest="arch", default=os.environ['SYS_ARCH'],
                                    help="Specify architector to use <"+os.environ['SYS_ARCH']+">" )
-        self._parser.add_argument( "--remove",
-                                   action="store_true", dest="remove_old", default=False,
-                                   help="Remove old archives <default=no>" )
         self._parser.add_argument( "--build-path",
                                    action="store", dest="build_path", default="/build/qualys",
                                    help="Specify alternate directory </build/qualys>" )
@@ -62,9 +99,14 @@ class _Main( object ) :
                                    action="store", dest="gcc_version", default=None,
                                    help="Specify GCC version to use <auto>" )
 
+        self._parser.set_defaults( clean=False )
+        self._parser.add_argument( "--clean", "-c",
+                                   action="store_true", dest="clean",
+                                   help="Cleanup old archives <default=no>" )
         self._parser.add_argument( "--no-clean",
-                                   action="store_false", dest="clean", default=True,
-                                   help="Disable temp directory cleanup <default=clean>" )
+                                   action="store_false", dest="clean",
+                                   help="Disable cleanup of old archives" )
+
         self._parser.add_argument( "--execute",
                                    action="store_true", dest="execute", default=True,
                                    help="Enable execution <default=yes>" )
@@ -94,17 +136,25 @@ class _Main( object ) :
             archive_name = '%s-ib_%s-%s-%s.tar.gz' % ( name, name2, self._args.arch, timestamp )
         return os.path.join( self._args.directory, archive_name )
 
-    def _CreateArchive( self, name, name2, directory, targets ) :
+    def _Execute( self, cmd, cwd=None ) :
+        if not self.Quiet :
+            if cwd is None :
+                print 'Executing', cmd
+            else :
+                print 'Executing', cmd, 'from', cwd
+        if self.Execute :
+            subprocess.call( cmd, cwd=cwd )
+
+    def _CreateArchive( self, name, name2, directory, targets, rules=None ) :
+        if rules is None :
+            rules = _RuleSet( )
         archive = self._ArchivePath(name, name2, self._args.timestamp)
         print 'Creating', name, 'archive', archive
         tar_cmd = 'cvfj' if self.Verbose else 'cfj'
-        cmd = [ "/bin/tar", tar_cmd, archive ] +list(targets)
-        if not self.Quiet :
-            print cmd, 'from', directory
-        if self.Execute :
-            subprocess.call( cmd, cwd=directory )
+        cmd = [ "/bin/tar", tar_cmd, archive ] + list(targets) + list(rules.Rules)
+        self._Execute( cmd, directory )
 
-    def _PopulateLocal( self, basedir, targetdir, excludes ) :
+    def _PopulateLocal( self, basedir, targetdir, rules ) :
         if self.Execute  and  os.path.exists(targetdir) :
             shutil.rmtree( targetdir )
         if self.Execute :
@@ -117,11 +167,9 @@ class _Main( object ) :
         else :
             rsync_flags = '-a'
         cmd = [ '/usr/bin/rsync', rsync_flags ] + \
-              [ '--exclude='+d for d in excludes ] + \
+              list(rules.Rules) + \
               [ basedir, targetdir ]
-        if not self.Quiet :
-            print cmd
-        subprocess.call( cmd )
+        self._Execute( cmd, basedir )
 
     def _ShowArchives( self ) :
         if self.Execute or True:
@@ -165,14 +213,13 @@ class _Main( object ) :
         path = ibversion.IbVersionReader.FindFile( libdir )
         if path is None :
             self._parser.error( 'Unable to find library file in "'+libdir+'"' )
-        print path
         vreader = ibversion.IbVersionReader( )
         version = vreader.GetAutoVersion( path )
         if version is None :
             print >> sys.stderr, "Unable to detect IronBee version!"
             sys.exit(1)
         print version, version.Major, version.Minor, version.Release
-        return '%s.%s' % (version.Major, version.Minor)
+        return '%s.%s.%s' % (version.Major, version.Minor, version.Release)
 
     def Main( self ) :
         self._ParseCmdline( )
@@ -188,12 +235,47 @@ class _Main( object ) :
         if not self.Quiet :
             print 'Archives will be named "'+self._ArchivePath('<name>', None, self._args.timestamp)+'"'
         self._CreateArchive( 'build', self._args.ib_version, self._args.build_path, ('gcc', install) )
-        self._PopulateLocal( '/local/qualys/', '/local/qualys/tmp/qualys',
-                             ('*.log', '*.blog', 'log/httpd/*', '*.lock', '*.meta',
-                              'data', 'crashes/*', 'tmp/*', '*.db') )
+        self._PopulateLocal( '/local/qualys/',
+                             '/local/qualys/tmp/qualys',
+                             _RuleSet( 'rsync',
+                                       (
+                                           _IncludeRule('opt/trafficserver-'+os.environ['ATS_VERSION']),
+                                           _ExcludeRule('opt/*'),
+                                           _ExcludeRule('etc/trafficserver/*'),
+                                           _ExcludeRule('**.release'),
+                                           _ExcludeRule('etc/ironbee/*'),
+                                           _ExcludeRule('**nginx'),
+                                           _ExcludeRule('.git'),
+                                           _ExcludeRule('*.log'),
+                                           _ExcludeRule('*.blog'),
+                                           _ExcludeRule('log/httpd/*'),
+                                           _ExcludeRule('*.lock'),
+                                           _ExcludeRule('*.meta'),
+                                           _ExcludeRule('data'),
+                                           _ExcludeRule('**/core'),
+                                           _ExcludeRule('crashes/*'),
+                                           _ExcludeRule('tmp/*'),
+                                           _ExcludeRule('*.db'),
+                                       )
+                                   )
+        )
         self._CreateArchive( 'local', None, '/local/qualys/tmp/qualys', ('.',) )
-        self._CreateArchive( 'etc.in', None, os.environ['QLYS_DEVEL'], ('etc.in',) )
-        if self._args.remove_old :
+        self._CreateArchive( 'etc.in', None,
+                             os.environ['QLYS_DEVEL'],
+                             ('etc.in',),
+                             _RuleSet( 'tar',
+                                       (
+                                           _ExcludeRule('*/trafficserver/release'),
+                                           _ExcludeRule('*/trafficserver/'),
+                                           _ExcludeRule('**/tmp'),
+                                           _ExcludeRule('**/nginx'),
+                                           _ExcludeRule('**/data'),
+                                           _ExcludeRule('**/.git'),
+                                           _ExcludeRule('**/*~'),
+                                       ) 
+                                   )
+        )
+        if self._args.clean :
             self._RemoveOldArchives( )
         if not self.Quiet :
             self._ShowArchives( )
