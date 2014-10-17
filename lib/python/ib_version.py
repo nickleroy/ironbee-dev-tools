@@ -98,6 +98,17 @@ class IbVersion( object ) :
         return 0
 
     @classmethod
+    def CheckStr( cls, s, match=True ) :
+        cls._InitClass( )
+        regexs = cls._match_regexs if match else cls._search_regexs
+        for regex in regexs :
+            m = regex.search( vstr )
+            if m is not None :
+                return True
+        else :
+            return False
+
+    @classmethod
     def StrToList( cls, vstr, match=True ) :
         cls._InitClass( )
         regexs = cls._match_regexs if match else cls._search_regexs

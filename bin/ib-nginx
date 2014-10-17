@@ -18,7 +18,7 @@
 import os
 import sys
 
-from ibtool import *
+from ib_tool_main import *
 
 class Main( IbToolMain ) :
     _nginx_defs = {

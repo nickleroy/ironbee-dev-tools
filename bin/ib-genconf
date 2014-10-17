@@ -26,8 +26,8 @@ import netifaces
 import socket
 import copy
 
-from ibutil import *
-from ibversion import *
+from ib_util import *
+from ib_version import *
 
 class ProcessError( BaseException ) : pass
 

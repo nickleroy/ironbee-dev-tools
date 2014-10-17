@@ -28,6 +28,7 @@ import platform
 import time
 import shutil
 import tarfile
+import configobj
 import stat
 
 class _Parser( object ) :
@@ -288,7 +289,8 @@ class _Main( object ) :
                             os.chmod( fp, stat.S_IRWXU )
                 shutil.rmtree( fullpath )
 
-    def _PopulateDirectory( self, ib_version, timestamp, name, dirpath, user_name, group=None, wipe=False ) :
+    def _PopulateDirectory( self, ib_version, timestamp, name, dirpath, user_name,
+                            group=None, wipe=False ) :
         user = User.LookUp( user_name )
         if not os.path.exists( dirpath ) :
             os.makedirs( dirpath )
@@ -304,7 +306,8 @@ class _Main( object ) :
             top = set()
             for member in tar.getmembers() :
                 if member.name.startswith("/") :
-                    print >>sys.stderr, 'Archive', fullpath, 'has fully qualified path! "%s"' % (member.name)
+                    print >>sys.stderr, \
+                        'Archive', fullpath, 'has fully qualified path! "%s"' % (member.name)
                     sys.exit(1)
                 m = regex.match( member.name )
                 if m is not None :
@@ -321,8 +324,32 @@ class _Main( object ) :
                 tar.extractall( path=dirpath )
                 if os.geteuid() == 0 :
                     user.ChownDir( "qualys", dirpath )
+            return [tarball]
         except tarfile.TarError as e :
-            print >>sys.stderr, 'Error extracting from tarvall "%s": %s' % ( tarball, e )
+            print >>sys.stderr, 'Error extracting from tarball "%s": %s' % ( tarball, e )
+            sys.exit(1)
+
+    def _ExtractTarballs( self, version, timestamp ) :
+        tbs = []
+        tbs += self._PopulateDirectory( version, timestamp,
+                                        "build", "/build/qualys",
+                                        self._args.user, "qualys",
+                                        wipe=True )
+        tbs += self._PopulateDirectory( None, timestamp,
+                                        "local", "/local/qualys",
+                                        self._args.user, "qualys",
+                                        wipe=('opt', 'share', 'etc', 'etc.in') )
+        tbs += self._PopulateDirectory( None, timestamp,
+                                        "etc.in", "/local/qualys",
+                                        self._args.user, "qualys", wipe=True )
+        etc = "/local/qualys/etc"
+        if os.path.exists( etc ) :
+            shutil.rmtree( etc )
+        os.makedirs( etc )
+        path = os.path.join(etc, 'tarballs.txt')
+        with open(path, 'w') as fp :
+            for tb in tbs :
+                print >>fp, tb
 
     def _SelectArchive( self ) :
         if self._args.branch is None :
@@ -342,7 +369,6 @@ class _Main( object ) :
             print >>sys.stderr, 'Invalid version string "%s"' % ( self._args.ib_version )
         if self._args.branch is not None :
             vpat += ':'+branch
-        print regex.pattern, vpat, self._ArchivePath('*', vpat, '*')
 
         latest = None
         timestr = None
@@ -350,13 +376,15 @@ class _Main( object ) :
         for archive in glob.glob( self._ArchivePath('*', vpat, '*') ) :
             match = regex.search( archive )
             if match is None :
-                print "No archives found!"
-                sys.exit(1)
+                continue
             timestamp = time.strptime( match.group(2), '%y%m%d_%H%M%S' )
             if latest is None  or  timestamp > latest :
                 latest = timestamp
                 version = match.group(1)
                 timestr = match.group(2)
+        if version is None :
+            print >>sys.stderr, "No archives found!"
+            sys.exit(1)
         return version,timestr
 
     def Main( self ) :
@@ -372,7 +400,8 @@ class _Main( object ) :
                 if v :
                     errors.append( n )
             if len(errors) :
-                print >>sys.stderr, "This program needs to be run by root to perform selected operations:"
+                print >>sys.stderr, \
+                    "This program needs to be run by root to perform selected operations:"
                 for e in errors :
                     print >>sys.stderr, '\t'+e
                 sys.exit( 1 )
@@ -387,17 +416,11 @@ class _Main( object ) :
             if timestamp is None :
                 print >>sys.stderr, "No archives matching IronBee", self._args.ib_version, "found"
             else :
-                print >>sys.stderr, "No archives matching IronBee", self._args.ib_version, self._args.timestamp, "found"
+                print >>sys.stderr, "No archives matching IronBee", \
+                    self._args.ib_version, self._args.timestamp, "found"
             sys.exit( 1 )
         if self._args.extract :
-            self._PopulateDirectory( version, timestamp, "build", "/build/qualys", self._args.user, "qualys", wipe=True )
-            self._PopulateDirectory( None, timestamp, "local", "/local/qualys", self._args.user, "qualys",
-                                     wipe=('opt', 'share', 'etc', 'etc.in') )
-            self._PopulateDirectory( None, timestamp, "etc.in", "/local/qualys", self._args.user, "qualys", wipe=True )
-            etc = "/local/qualys/etc"
-            if os.path.exists( etc ) :
-                shutil.rmtree( etc )
-            os.makedirs( etc )
+            self._ExtractTarballs( version, timestamp )
 
 main = _Main( )
 main.Main( )

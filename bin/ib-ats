@@ -19,7 +19,7 @@ import os
 import sys
 import subprocess
 
-from ibtool import *
+from ib_tool_main import *
 
 class Main( IbToolMain ) :
     _ats_defs = {
