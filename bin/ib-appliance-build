@@ -23,146 +23,70 @@ import subprocess
 import argparse
 import time
 import glob
+import shlex
+import tarfile
 import git
-import ib_version
-import ib_appliance
-import ib_base_parser
+import functools
+from ib_version import *
+from ib_appliance_exceptions import *
+from ib_appliance_build      import *
+from ib_appliance_config     import *
+from ib_appliance_parser     import *
 
 class DetectionError(BaseException) : pass
 
+class _Parser( IbApplianceParser ) :
+    def __init__( self ) :
+        IbApplianceParser.__init__( self, "Program to build an archive for appliances" )
+
+        self.Parser.add_argument( "--etc-branch",
+                                  action="store", dest="etc_branch", default=None,
+                                  help="Specify alternate etc.in git branch name <auto>" )
+
+        self.Parser.add_argument( "--gcc-version",
+                                  action="store", dest="gcc_version", default=None,
+                                  help="Specify GCC version to use <auto>" )
+
+        self.Parser.add_argument( "--ib-build-dir",
+                                  action="store", dest="ib_build", default='.',
+                                  help="Specify IronBee build directory <.>" )
+
+        self.Parser.set_defaults( clean=False )
+        self.Parser.add_argument( "--clean", "-c",
+                                  action="store_true", dest="clean",
+                                  help="Cleanup old archives <default=no>" )
+        self.Parser.add_argument( "--no-clean",
+                                  action="store_false", dest="clean",
+                                  help="Disable cleanup of old archives" )
 
 class _Main( object ) :
     def __init__( self ) :
-        self._parser = argparse.ArgumentParser(
-            description="Program to build an archive for appliances",
-            prog="ib-appliance-build" )
-
-        self._parser.add_argument( "--timestamp",
-                                   action="store", dest="timestamp",
-                                   default=time.strftime('%y%m%d-%H%M%S'),
-                                   help="Specify timestamp <yymmdd-hhmmss>" )
-
-        self._parser.add_argument( "--arch",
-                                   action="store", dest="arch", default=os.environ['SYS_ARCH'],
-                                   help="Specify architector to use <"+os.environ['SYS_ARCH']+">" )
-
-        self._parser.add_argument( "--ib-version",
-                                   action="store", dest="ib_version", default=None,
-                                   help="Specify IronBee version to use <auto>" )
-
-        self._parser.add_argument( "--branch",
-                                   action="store", dest="branch", default=None,
-                                   help="Specify git branch to use <auto>" )
-
-        self._parser.add_argument( "--gcc-version",
-                                   action="store", dest="gcc_version", default=None,
-                                   help="Specify GCC version to use <auto>" )
-        
-        self._parser.add_argument( "--build-root",
-                                   action="store", dest="build_root", default=os.environ['QLYS_BUILD'],
-                                   help="Specify alternate directory <"+os.environ['QLYS_BUILD']+">" )
-
-        config = os.path.join(os.environ['QLYS_ETC'], 'ib-appliance.conf')
-        self._parser.add_argument( "--config",
-                                   action="store", dest="config", default=config,
-                                   help="Specify configuration file to use <"+config+">" )
-
-        builds = os.environ['QLYS_BUILDS']
-        self._parser.add_argument( "--builds",
-                                   action="store", dest="builds", default=builds,
-                                   help="Specify builds directory <"+builds+">" )
-
-        self._parser.add_argument( "--list",
-                                   action="store_true", dest="list", default=False,
-                                   help="List archives <default=no>" )
-
-        self._parser.set_defaults( clean=False )
-        self._parser.add_argument( "--clean", "-c",
-                                   action="store_true", dest="clean",
-                                   help="Cleanup old archives <default=no>" )
-        self._parser.add_argument( "--no-clean",
-                                   action="store_false", dest="clean",
-                                   help="Disable cleanup of old archives" )
-
-        self._parser.add_argument( "--execute",
-                                   action="store_true", dest="execute", default=True,
-                                   help="Enable execution <default=yes>" )
-        self._parser.add_argument( "-n", "--no-execute",
-                                   action="store_false", dest="execute",
-                                   help="Disable execution (for test/debug) <Default=execute>" )
-        self._parser.add_argument( "-v", "--verbose",
-                                   action="count", dest="verbose", default=0,
-                                   help="Increment verbosity level" )
-        self._parser.add_argument( "-q", "--quiet",
-                                   action="store_true", dest="quiet", default=False,
-                                   help="be vewwy quiet (I'm hunting wabbits) <default=no-quiet>" )
+        self._parser = _Parser( )
 
     def _ParseCmdline( self ) :
-        self._args = self._parser.parse_args()
-        if not self.Execute  and  self.Verbose == 0  and  not self.Quiet :
-            self._verbose = 1
+        self._args = self._parser.Parse()
+        if self._args.timestamp is None :
+            self._args.timestamp = time.time()
 
     def _ReadConfig( self ) :
-        validator = Validator()
-        config = ConfigObj( self._args.config )
-        if 'build' not in config :
-            print >>sys.stderr, "No targets section found"
-            sys.exit(1)
+        config = IbApplianceConfig( self._args.config )
+        self._config = config.Read( )
 
-    Execute = property( lambda self : self._args.execute )
-    Verbose = property( lambda self : self._args.verbose )
-    Quiet   = property( lambda self : self._args.quiet )
-
-    def _Execute( self, cmd, cwd=None ) :
-        if not self.Quiet :
-            if cwd is None :
-                print 'Executing', cmd
-            else :
-                print 'Executing', cmd, 'from', cwd
-        if self.Execute :
-            subprocess.call( cmd, cwd=cwd )
-
-    def _CreateArchive( self, name, directory, targets, rules=None ) :
-        if rules is None :
-            rules = _RuleSet( )
-        archive = os.path.join(self._archive_dir, name+'.tar.bz2')
-        print 'Creating', name, 'archive', archive
-        tar_cmd = 'cvfj' if self.Verbose else 'cfj'
-        cmd = [ "/bin/tar", tar_cmd, archive ] + list(targets) + list(rules.Rules)
-        self._Execute( cmd, directory )
-
-    def _PopulateLocal( self, basedir, targetdir, rules ) :
-        if self.Execute  and  os.path.exists(targetdir) :
-            shutil.rmtree( targetdir )
-        if self.Execute :
-            os.makedirs( os.path.join(targetdir, 'var', 'run') )
-        print 'Populating', targetdir, 'from', basedir
-        if not self.Execute :
-            rsync_flags = '-avn' if self.Verbose > 1 else '-an'
-        elif self.Verbose :
-            rsync_flags = '-av'
-        else :
-            rsync_flags = '-a'
-        cmd = [ '/usr/bin/rsync', rsync_flags ] + \
-              list(rules.Rules) + \
-              [ basedir, targetdir ]
-        self._Execute( cmd, basedir )
-
-    def _ShowArchives( self ) :
-        if self.Execute or True:
-            archives = self._ArchivePath('*', None, self._args.timestamp)
-            matches = glob.glob(archives)
-            if len(matches) :
-                cmd = ( '/usr/bin/ls', '-lh' ) + tuple(glob.glob(matches))
-                subprocess.call( cmd )
+    def _ShowArchiveDir( self ) :
+        print "Archive directory:", self._archive_dir
+        if self._parser.Execute :
+            cmd = ( '/usr/bin/ls', '-lh', self._archive_dir )
+            subprocess.call( cmd )
+            print "Data:"
+            with open( os.path.join(self._archive_dir, 'archives.txt') ) as fp :
+                for line in fp :
+                    print line.rstrip()
 
     def _ListArchives( self ) :
-        archives = self._ArchivePath('*', None, '*')
-        cmd = ( '/usr/bin/ls', '-lh' ) + tuple(glob.glob(archives))
+        cmd = ( '/usr/bin/ls', '-lh', self._archive_dir )
         subprocess.call( cmd )
 
     def _CleanArchives( self, verstring ) :
-        regex = re.compile( r'(\d{6}_\d{6})' )
         timestamps = []
         archives = []
         for archive in glob.glob(self._ArchivePath('*', verstring, '*')) :
@@ -173,13 +97,17 @@ class _Main( object ) :
         for timestamp in timestamps :
             for archive in glob.glob(self._ArchivePath('*', None, timestamp)) :
                 archives.append(archive)
-        if self.Verbose and len(archives):
+        if self._parser.Verbose and len(archives):
             print "Cleaning archives:", archives
-        if self.Execute :
+        if self._parser.Execute :
             for archive in archives :
                 os.remove( archive )
 
     def _DetectGccVersion( self ) :
+        if self._args.gcc_version is not None :
+            return self._args.gcc_version
+        elif 'GCC_VERSION' in os.environ :
+            return os.environ['GCC_VERSION']
         cmd = ( 'gcc', '--version' )
         output = subprocess.check_output( cmd )
         try :
@@ -193,77 +121,191 @@ class _Main( object ) :
     def _DetectIronBeeVersion( self ) :
         if self._args.ib_version is None :
             libdir = os.environ['IB_LIBDIR']
-            path = ibversion.IbVersionReader.FindFile( libdir )
+            path = IbVersionReader.FindFile( libdir )
             if path is None :
                 raise DetectionError('Unable to find library file in "'+libdir+'"')
-            vreader = ibversion.IbVersionReader( )
+            vreader = IbVersionReader( )
             return vreader.GetAutoVersion( path )
         else :
-            return ibversion( self._args.ib_version )
+            return IbVersion( self._args.ib_version )
 
-    def _DetectGitBranch( self ) :
-        if self._args.branch is not None :
-            return self._args.branch
+    def _ReadBuildConfig( self ) :
+        try :
+            regex = re.compile(r'\s*\$\s+(.*)')
+            for line in open(os.path.join(self._args.ib_build,'config.log') ) :
+                match = regex.match(line)
+                if match is not None :
+                    return match.group(1)
+        except IOError :
+            pass
+        return None
+
+    def _DetectGitBranch( self, args_branch, repo_path ) :
+        if args_branch is not None :
+            return (args_branch, None)
         else :
-            repo = git.Repo( os.environ['IB_ROOT'])
-            return repo.active_branch
+            repo = git.Repo( repo_path )
+            return (repo.active_branch.name, repo.commit().hexsha)
 
     def _DetectStuff( self ) :
         try :
-            self._arch = self._args.arch
-            self._gccver = self._DetectGccVersion( )
-            self._ibver = self._DetectIronBeeVersion( )
-            self._branch = self._DetectGitBranch( )
-            base = "{:s}-{:s}-{:s}".format(self._branch, self._ibver, self._args.timestamp)
-            self._archive_dir = os.path.join(self._args.builds, base)
-            if not self.Quiet :
+            self._appliance = IbApplianceBuild( )
+            self._appliance.Architecture = self._args.arch
+            self._appliance.GccVersion = self._DetectGccVersion( )
+            self._appliance.IronBeeVersion = self._DetectIronBeeVersion( )
+            self._appliance.BuildConfig = self._ReadBuildConfig( )
+            if self._appliance.BuildConfig is not None :
+                configure = shlex.split(self._appliance.BuildConfig)[0]
+                self._ib_root = os.path.dirname(configure)
+            else :
+                self._ib_root = os.environ['IB_ROOT']
+            (self._appliance.IronBeeGitBranch, self._appliance.IronBeeGitCommit) = \
+                self._DetectGitBranch( self._args.ib_branch, self._ib_root)
+            (self._appliance.EtcInGitBranch, self._appliance.EtcInGitCommit) = \
+                self._DetectGitBranch( self._args.etc_branch, os.environ['QLYS_ETC_IN'] )
+            self._appliance.TimeStamp = self._args.timestamp
+            self._archive_dir = self._appliance.GetPath( self._args.builds )
+            if not self._parser.Quiet :
                 print 'Archives will be stored in "'+self._archive_dir
         except DetectionError as e:
             print >>sys.stderr, "Auto detection failed: ", e
             sys.exit(1)
 
+    def _ArchiveFilter( self, patterns, tinfo ) :
+        """
+        Generic filter function for tarball archive creation using the tarball
+        module.  This function takes a pointer to self, and a list / tuple of
+        patterns, and a tarfile.TarInfo object.  The pattern list should
+        should be a tuple/list with 2 elements: True/False, and a compiled re.
+        When a path matches the pattern, the original tinfo will be returned
+        if tf is True, otherwise None will be returned.  If, after exhausting
+        all patterns, no match has been found, the original tinfo is returned.
+        """
+        for tf, regex in patterns :
+            if regex.search( tinfo.name ) :
+                if tf and self._parser.Verbose :
+                    print tinfo.name
+                return tinfo if tf else None
+        if self._parser.Verbose >= 2 :
+            print tinfo.name
+        return tinfo
+
+    def _CopyIgnore( self, patterns, basedir, names ) :
+        """
+        Generic filter function for filtering file name/paths based on patterns,
+        matching the optional ignore parameter to shutil.copytree().  This
+        function takes a pointer to self, and a list / tuple of patterns, a
+        base directory, and a list of entries.  The pattern list should should
+        be a tuple/list with 2 elements: True/False, and a compiled re.  When
+        a path matches the pattern, the entry will be added to the ignore list
+        if tf is True, otherwise it is excluded from the ignore list.  If,
+        after exhausting all patterns, no match has been found, the entry is
+        not added to the ignore list.  After completion, the final list of
+        ignored names is returned.
+        """
+        ignore_list = []
+        for name in names :
+            path = os.path.join(basedir, name)
+            ignore = None
+            for (tf, regex) in patterns :
+                if regex.search(path) :
+                    ignore = tf
+                    if self._parser.Verbose >= 3 :
+                        print path+':', ignore, regex.pattern
+                    elif not ignore and self._parser.Verbose >= 2 :
+                        print path
+                    break
+            if ignore is True :
+                ignore_list.append(name)
+        return ignore_list
+
     def _CreateBuildArchive( self ) :
-        self._CreateArchive( 'build', verstring, self._args.build_root, ('gcc', install) )
+        tpath = os.path.join(self._archive_dir, 'build.tar.bz2')
+        if not self._parser.Quiet :
+            print 'Creating build tarball', tpath
+        tball = tarfile.TarFile.open( tpath, 'w:bz2' )
+        os.chdir( self._args.build_root )
+        tball.add( 'gcc',
+                   filter=functools.partial(self._ArchiveFilter, []) )
+        tball.add( 'gcc-'+self._appliance.GccVersion+'/install',
+                   filter=functools.partial(self._ArchiveFilter, []) )
+        tball.close( )
+        self._appliance.AddArchive( 'build', 'build.tar.bz2', self._args.build_root )
+
+    _local_ignore_ats = 'trafficserver-'+os.environ['ATS_VERSION'].replace('.', '\.')
+    _local_ignore_rules = (
+        # ignore?, pattern ..  First match wins
+        (True,  re.compile(r'tmp/.*')),
+        (True,  re.compile(r'opt/'+_local_ignore_ats+'/(etc|var|tmp)')),
+        (False, re.compile(r'opt/'+_local_ignore_ats+'/(bin|include|lib|share)')),
+        (False, re.compile(r'opt/'+_local_ignore_ats+'/?$')),
+        (True,  re.compile(r'opt/.*')),
+        (True,  re.compile(r'etc/trafficserver/.*')),
+        (True,  re.compile(r'etc/ironbee/.*')),
+        (True,  re.compile(r'nginx')),
+        (True,  re.compile(r'\.(log|blog|git|lock|meta|db|release)')),
+        (True,  re.compile(r'log/(httpd|trafficserver/.*)')),
+        (True,  re.compile(r'data')),
+        (True,  re.compile(r'/core')),
+        (True,  re.compile(r'ats.valgrind.*')),
+        (True,  re.compile(r'crashes')),
+    )
 
     def _CreateLocalArchive( self ) :
-        tmp = os.path.join(os.environ['QLYS_TMP'], 'qualys')
-        rules = _RuleSet( 'rsync',
-                          (
-                              _IncludeRule('opt/trafficserver-'os.environ['ATS_VERSION']),
-                              _ExcludeRule('opt/*'),
-                              _ExcludeRule('etc/trafficserver/*'),
-                              _ExcludeRule('**.release'),
-                              _ExcludeRule('etc/ironbee/*'),
-                              _ExcludeRule('**nginx'),
-                              _ExcludeRule('.git'),
-                              _ExcludeRule('*.log'),
-                              _ExcludeRule('*.blog'),
-                              _ExcludeRule('log/httpd/*'),
-                              _ExcludeRule('*.lock'),
-                              _ExcludeRule('*.meta'),
-                              _ExcludeRule('data'),
-                              _ExcludeRule('**/core'),
-                              _ExcludeRule('crashes/*'),
-                              _ExcludeRule('tmp/*'),
-                              _ExcludeRule('*.db'),
-                          )
-                      )
-        self._PopulateLocal( os.environ['QLYS_LOCAL'], tmp, rules)
-        self._CreateArchive( 'local', None, tmp, ('.',) )
+        tmpdir = os.path.join(os.environ['QLYS_TMP'], 'qualys')
+        local = os.environ['QLYS_LOCAL']
+        print 'Populating tmp local tree "'+tmpdir+'" from "'+local+'" ...'
+        if self._parser.Execute :
+            if os.path.exists( tmpdir ) :
+                shutil.rmtree( tmpdir )
+            shutil.copytree( local, tmpdir,
+                             ignore=functools.partial(self._CopyIgnore, self._local_ignore_rules) )
+            varrun = os.path.join(tmpdir, 'var', 'run')
+            if not os.path.exists( varrun ) :
+                os.makedirs( varrun )
+
+        tpath = os.path.join(self._archive_dir, 'local.tar.bz2')
+        if not self._parser.Quiet :
+            print 'Creating build tarball', tpath
+        tball = tarfile.TarFile.open( tpath, 'w:bz2' )
+        os.chdir( tmpdir )
+        for d in ( 'bin', 'opt', 'share', 'tmp' ) :
+            tball.add( d, filter=functools.partial(self._ArchiveFilter, []) )
+        tball.close( )
+        self._appliance.AddArchive( 'local', 'local.tar.bz2', local )
+
+    _etcin_archive_rules = (
+        (False, re.compile(r'trafficserver/release')),
+        (False, re.compile(r'/trafficserver/')),
+        (False, re.compile(r'/tmp')),
+        (False, re.compile(r'/nginx')),
+        (False, re.compile(r'/data')),
+        (False, re.compile(r'\/\.git')),
+        (False, re.compile(r'~$')),
+    )
 
     def _CreateEtcArchive( self ) :
-        self._CreateArchive( 'etc.in', None, os.environ['QLYS_DEVEL'], ('etc.in',),
-                             _RuleSet( 'tar',
-                                       (
-                                           _ExcludeRule('*/trafficserver/release'),
-                                           _ExcludeRule('*/trafficserver/'),
-                                           _ExcludeRule('**/tmp'),
-                                           _ExcludeRule('**/nginx'),
-                                           _ExcludeRule('**/data'),
-                                           _ExcludeRule('**/.git'),
-                                           _ExcludeRule('**/*~'),
-                                       )
-                                   )
+        tpath = os.path.join(self._archive_dir, 'etc.in.tar.bz2')
+        if not self._parser.Quiet :
+            print 'Creating build tarball', tpath
+        tball = tarfile.TarFile.open( tpath, 'w:bz2' )
+        os.chdir( os.environ['QLYS_DEVEL'] )
+        tball.add( 'etc.in',
+                   filter=functools.partial(self._ArchiveFilter, self._etcin_archive_rules) )
+        tball.close( )
+        self._appliance.AddArchive( 'etc-in', 'etc.in.tar.bz2', os.environ['QLYS_LOCAL'] )
+
+    def _CreateSummary( self ) :
+        self._appliance.WriteArchiveData( self._args.builds )
+
+    def _CreateArchives( self ) :
+        self._archives = [ ]
+        if self._parser.Execute :
+            os.makedirs( self._archive_dir )
+        self._CreateBuildArchive( )
+        self._CreateEtcArchive( )
+        self._CreateLocalArchive( )
+        self._CreateSummary( )
 
     def Main( self ) :
         self._ParseCmdline( )
@@ -271,13 +313,11 @@ class _Main( object ) :
             self._ListArchives( )
             sys.exit( 0 )
         self._DetectStuff( )
-        self._CreateBuildArchive( )
-        self._CreateEtcArchive( )
-        )
+        self._CreateArchives( )
         if self._args.clean :
             self._CleanArchives( verstring )
-        if not self.Quiet :
-            self._ShowArchives( )
+        if not self._parser.Quiet :
+            self._ShowArchiveDir( )
 
 main = _Main( )
 main.Main( )

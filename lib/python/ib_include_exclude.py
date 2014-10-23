@@ -18,10 +18,11 @@
 import re
 import os
 import sys
-import shutil
+from ib_base_parser import *
 
 class IbArchiverException( BaseException ) : pass
 class IbArchiverRuleError( IbArchiverException ) : pass
+
 class _ArchiverRule( object ) :
     """
     Base class for managing include / exclude rules for rsync

@@ -48,11 +48,15 @@ class IbVersion( object ) :
         self._InitClass( )
         if s is None  and  elements is None :
             raise IbInvalidVersion( )
+        elif type(s) == IbVersion : 
+            elements = s.Elements
         if elements is None :
             elements = self.StrToList( s )
             if elements is None :
                 raise IbInvalidVersion( '"'+s+'"' )
         else :
+            if type(elements) == int :
+                elements = [elements]
             if type(elements) not in (list, tuple)  or  len(elements) not in (1,2,3) :
                 raise IbInvalidVersion( str(elements) )
             for v in elements :
@@ -76,26 +80,52 @@ class IbVersion( object ) :
     def _SetPath( self, path ) :
         self._path = path
 
-    Major     = property( lambda self : self._GetVersionItem(0) )
-    Minor     = property( lambda self : self._GetVersionItem(1) )
-    Release   = property( lambda self : self._GetVersionItem(2) )
-    Version   = property( lambda self : self._elements )
-    Elements  = property( lambda self : len(self._elements) )
-    String    = property( lambda self : str(self._elements) )
-    RawString = property( lambda self : self._elements )
-    Path      = property( lambda self : self._path, _SetPath )
+    Major       = property( lambda self : self._GetVersionItem(0) )
+    Minor       = property( lambda self : self._GetVersionItem(1) )
+    Release     = property( lambda self : self._GetVersionItem(2) )
+    Version     = property( lambda self : self._elements )
+    NumElements = property( lambda self : len(self._elements) )
+    Elements    = property( lambda self : tuple(self._elements) )
+    String      = property( lambda self : str(self._elements) )
+    RawString   = property( lambda self : self._elements )
+    Path        = property( lambda self : self._path, _SetPath )
 
     DefaultFormat = property( lambda self : "%{1}.%{2}.%{3}" )
 
-    def Compare( self, other ) :
-        for n in range( min(self.Elements, other.Elements) ) :
+    def Compare( self, other, ignore=True ) :
+        for n in range( min(self.NumElements, other.NumElements) ) :
             elem1 = self.GetElement(n)
             elem2 = other.GetElement(n)
-            if elem1 == elem2 :
-                pass
-            else :
+            if elem1 != elem2 :
                 return elem2 - elem1
-        return 0
+        if ignore :
+            return 0
+        else :
+            return other.NumElements - self.NumElements
+
+    def __getitem__( self, k ) :
+        return IbVersion(None, self._elements[k])
+
+    def __cmp__( self, other ) :
+        return self.Compare( other, False )
+
+    def __eq__( self, other ) :
+        return self.Compare( other, True ) == 0
+
+    def __ne__( self, other ) :
+        return self.Compare( other, True ) != 0
+
+    def __gt__( self, other ) :
+        return self.Compare( other, False ) < 0
+
+    def __ge__( self, other ) :
+        return self.Compare( other, True ) <= 0
+
+    def __lt__( self, other ) :
+        return self.Compare( other, False ) > 0
+
+    def __le__( self, other ) :
+        return self.Compare( other, True ) >= 0
 
     @classmethod
     def CheckStr( cls, s, match=True ) :
@@ -148,6 +178,9 @@ class IbVersion( object ) :
         for pat, repl in self._std_formats.items() :
             format = format.replace( pat, repl )
         return format
+
+    def __str__( self ) :
+        return self.Format( )
 
 
 class _IbVersionCmpOp( object ) :
@@ -373,3 +406,68 @@ class IbVersionReader( object ) :
 
 IbVersion._InitClass( )
 _IbVersionOpTable._InitClass( )
+
+
+if __name__ == "__main__" :
+    v0x  = IbVersion('0')
+    v01x = IbVersion('0.1')
+    v010 = IbVersion('0.1.0')
+    v011 = IbVersion('0.1.1')
+    v012 = IbVersion('0.1.2')
+    v013 = IbVersion('0.1.3')
+    v02x = IbVersion('0.2')
+    v020 = IbVersion('0.2.0')
+    v021 = IbVersion('0.2.1')
+    v022 = IbVersion('0.2.2')
+    v023 = IbVersion('0.2.3')
+    v1x  = IbVersion('1')
+    v10x = IbVersion('1.0')
+    v100 = IbVersion('1.0.0')
+    v101 = IbVersion('1.0.1')
+    v102 = IbVersion('1.0.2')
+    v103 = IbVersion('1.0.3')
+    v11x = IbVersion('1.1')
+    v110 = IbVersion('1.1.0')
+    v111 = IbVersion('1.1.1')
+    v112 = IbVersion('1.1.2')
+    v113 = IbVersion('1.1.3')
+    v12x = IbVersion('1.2')
+    v120 = IbVersion('1.2.0')
+    v121 = IbVersion('1.2.1')
+    v122 = IbVersion('1.2.2')
+    v123 = IbVersion('1.2.3')
+    assert v01x[0] == IbVersion('0'), str(v01x[0])+' != '+str(IbVersion('0'))
+    assert v10x[0] == IbVersion('1')
+    assert v01x[0:1] == IbVersion('0')
+    assert v01x[0:2] == IbVersion('0.1')
+    assert v10x[0:2] == IbVersion('1.0')
+    assert v100[0:2] == IbVersion('1.0')
+    assert v100[0:3] == IbVersion('1.0.0')
+    assert v010[0] == IbVersion('0')
+    assert v1x  >  v0x
+    assert v10x >  v01x
+    assert v010 == v01x
+    assert v010 >  v01x
+    assert v011 == v01x
+    assert v101 >  v100
+    assert v102 >  v100
+    assert v102 >  v10x
+    assert v10x <  v102
+    assert v102 >= v10x
+    assert v11x >  v10x
+    assert v11x >  v103
+    assert v111 >  v100
+    assert v111 >  v110
+    assert v120 >= v12x
+    assert IbVersion('0.11.3') == IbVersion('0.11.3')
+    assert IbVersion('0.11.2') == IbVersion('0.11')
+    assert IbVersion('0.11.3') == IbVersion('0.11')
+    print "Passed"
+
+
+### Local Variables: ***
+### py-indent-offset:4 ***
+### python-indent:4 ***
+### python-continuation-offset:4 ***
+### tab-width:4  ***
+### End: ***

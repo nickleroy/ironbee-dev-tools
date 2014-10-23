@@ -18,41 +18,50 @@
 import re
 import os
 import sys
-import subprocess
 import argparse
 
 class IbBaseParser( object ) :
+    """
+    Set up a basic parser for IronBee Python scripts.
+    """
     def __init__( self, description ) :
-        self._base_parser = argparse.ArgumentParser(
+        parser = argparse.ArgumentParser(
             description=description,
             prog=os.path.basename(sys.argv[0]) )
         
-        self._parser.add_argument( "--execute",
-                                   action="store_true", dest="execute", default=True,
-                                   help="Enable execution <default=yes>" )
-        self._parser.add_argument( "-n", "--no-execute",
-                                   action="store_false", dest="execute",
-                                   help="Disable execution (for test/debug)" )
-        self._parser.add_argument( "-v", "--verbose",
-                                   action="count", dest="verbose", default=0,
-                                   help="Increment verbosity level" )
-        self._parser.add_argument( "-q", "--quiet",
-                                   action="store_true", dest="quiet", default=False,
-                                   help="be vewwy quiet (I'm hunting wabbits)" )
-        self._parser = self._base_parser
+        parser.add_argument( "--execute",
+                             action="store_true", dest="execute", default=True,
+                             help="Enable execution <default=yes>" )
+        parser.add_argument( "-n", "--no-execute",
+                             action="store_false", dest="execute",
+                             help="Disable execution (for test/debug)" )
+        parser.add_argument( "-v", "--verbose",
+                             action="count", dest="verbose", default=0,
+                             help="Increment verbosity level" )
+        parser.add_argument( "-q", "--quiet",
+                             action="store_true", dest="quiet", default=False,
+                             help="be vewwy quiet (I'm hunting wabbits)" )
+        self._parsers = [ parser ]
 
-    def CreateParser( self, parent=None ) :
-        if parent is None :
-            parent = self._base_parser
-        parser = argparse.ArgumentParser( parent=parent )
-        self._parser = parser
+    def CreateChildParser( self ) :
+        parser = argparse.ArgumentParser( parents=self._parsers )
+        self._parsers.append( parser )
         return parser
 
-    def ParseCmdLine( self ) :
-        self._args = self._parser.parse_args()
+    def Parse( self ) :
+        self._args = self._parsers[-1].parse_args()
         if not self._args.execute  and  self._args.verbose == 0  and  not self._args.quiet :
             self._verbose = 1
         return self._args
+
+    Parser  = property( lambda self : self._parsers[0] )
+    Execute = property( lambda self : self._args.execute )
+    Verbose = property( lambda self : self._args.verbose )
+    Quiet   = property( lambda self : self._args.quiet )
+
+if __name__ == "__main__" :
+    base = IbBaseParser("Test")
+    print base
 
 ### Local Variables: ***
 ### py-indent-offset:4 ***

@@ -21,6 +21,7 @@ import re
 import os
 import sys
 import pwd
+import grp
 import glob
 import subprocess
 import argparse
@@ -28,10 +29,13 @@ import platform
 import time
 import shutil
 import tarfile
-import configobj
 import stat
+from ib_appliance_exceptions import *
+from ib_appliance_build      import *
+from ib_appliance_config     import *
+from ib_appliance_parser     import *
 
-class _Parser( object ) :
+class _Parser( IbApplianceParser ) :
     _parts = {
         'setup_homes' : {
             "arg"     : 'setup-homes',
@@ -56,28 +60,15 @@ class _Parser( object ) :
     }
 
     def __init__( self ) :
-        self._parser = argparse.ArgumentParser(
-            description="Program to install IronBee on a VM host",
-            prog="ib-appliance-install" )
+        IbApplianceParser.__init__( self, 
+                                    "Program to install IronBee on a VM host" )
 
-        self._parser.add_argument( "--user",
-                                   action="store", dest="user", default="nick",
-                                   help='Specify user to setup <default:nick>' )
-
-        default = "0.11"
-        self._parser.add_argument( "ib_version", default=default,
-                                   help="IronBee version to install <"+default+">" )
-
-        arch = platform.linux_distribution()[2]
-        self._parser.add_argument( "--arch",
-                                   action="store", dest="arch", default=arch,
-                                   help="Specify architector to use <"+arch+">" )
-        self._parser.add_argument( "--timestamp",
-                                   action="store", dest="timestamp", default=None,
-                                   help='Specify timestamp of archives <default:None>' )
-        self._parser.add_argument( "--branch",
-                                   action="store", dest="branch", default=None,
-                                   help="Specify git branch to use <None>" )
+        self.Parser.add_argument( "--user",
+                                  action="store", dest="user", default=None,
+                                  help='Specify user to setup <default=from config>' )
+        self.Parser.add_argument( "--group",
+                                  action="store", dest="group", default=None,
+                                  help='Specify group to setup <default=from config>' )
 
         class PartsAction(argparse.Action):
             def __call__(self, parser, namespace, values, option_string=None):
@@ -105,7 +96,7 @@ class _Parser( object ) :
                             if other != name  and  only :
                                 vars(namespace)[other] = False
 
-        group = self._parser.add_argument_group( 'Mode', 'Enable for modes of operation' )
+        group = self.Parser.add_argument_group( 'Mode', 'Enable for modes of operation' )
         for name,part in _Parser._parts.items( ) :
             arg = part['arg']
             default = part['default']
@@ -122,49 +113,39 @@ class _Parser( object ) :
         group.add_argument( '--enable-all', '--init',
                             action=PartsAction, nargs=0,
                             help='Enable all actions' )
-        
-        self._parser.add_argument( "--execute",
-                                   action="store_true", dest="execute", default=True,
-                                   help="Enable execution <default=yes>" )
-        self._parser.add_argument( "-n", "--no-execute",
-                                   action="store_false", dest="execute",
-                                   help="Disable execution (for test/debug)" )
-        self._parser.add_argument( "-v", "--verbose",
-                                   action="count", dest="verbose", default=0,
-                                   help="Increment verbosity level" )
-        self._parser.add_argument( "-q", "--quiet",
-                                   action="store_true", dest="quiet", default=False,
-                                   help="be vewwy quiet (I'm hunting wabbits)" )
-
-    def ParseCmdLine( self ) :
-        self._args = self._parser.parse_args()
-        if not self._args.execute  and  self._args.verbose == 0  and  not self._args.quiet :
-            self._verbose = 1
-        return self._args
 
 class User( object ) :
-    __cache = { }
-
-    def __init__( self, user_name ) :
+    def __init__( self, user_name, group=None ) :
         self._user_name = user_name
         pwent = pwd.getpwnam(user_name)
-        self._home = pwent.pw_dir
-        self._uid = pwent.pw_uid
-        self._gid = pwent.pw_gid
+        assert pwent is not None
+        self._home  = pwent.pw_dir
+        self._uid   = pwent.pw_uid
+        self._setGroup( group, pwent.pw_gid )
+
+    def _setGroup( self, group, gid=None ) :
+        assert group is not None  or  gid is not None
+        if gid is None :
+            gwent = grp.getgrnam(group)
+        else :
+            gwent = grp.getgrgid(gid)
+        assert gwent is not None
+        self._gid        = gwent.gr_gid
+        self._group_name = gwent.gr_name
+
+    Group = property( lambda self : self._group, _setGroup )
 
     def Chown( self, path ) :
         os.chown( path, self.Uid, self.Gid )
 
-    def ChownDirs( self, group, paths ) :
-        if group is None :
-            group = self.Gid
-        cmd = [ "/bin/chown", "-R", self._user_name+":"+str(group) ]
+    def ChownDirs( self, paths ) :
+        cmd = [ "/bin/chown", "-R", ':'.join(self._user_name, self._group_name) ]
         cmd += list(paths)
         print "Executing", cmd
         subprocess.call( cmd )
 
-    def ChownDir( self, group, path ) :
-        self.ChownDirs( group, (path,) )
+    def ChownDir( self, path ) :
+        self.ChownDirs( (path,) )
 
     def SetupHomeDir( self ) :
         if not os.path.exists( self.Home ) :
@@ -173,31 +154,53 @@ class User( object ) :
     def Finished( self ) :
         self.ChownDir( None, self._home )
 
-    @classmethod
-    def LookUp( cls, username ) :
-        try :
-            return cls.__cache[username]
-        except KeyError :
-            user = cls( username )
-            cls.__cache[username] = user
-            return user
-
     Name  = property( lambda self : self._user_name )
     Uid   = property( lambda self : self._uid )
+    Group = property( lambda self : self._group_name )
     Gid   = property( lambda self : self._gid )
     Home  = property( lambda self : self._home )
+                
 
 class _Main( object ) :
-
     def __init__( self ) :
         self._parser = _Parser( )
 
     def _ParseCmdLine( self ) :
-        self._args = self._parser.ParseCmdLine( )
+        self._args = self._parser.Parse( )
 
-    Execute = property( lambda self : self._args.execute )
-    Verbose = property( lambda self : self._args.verbose )
-    Quiet   = property( lambda self : self._args.quiet )
+    def _ReadConfig( self ) :
+        config = IbApplianceConfig( self._args.config )
+        self._config = config.Read( )
+
+    def _MergeConfig( self ) :
+        self._specs = IbApplianceBuild( )
+        defaults = self._config['install']['defaults']
+
+        if self._args.user is not None :
+            user = self._args.user
+        elif defaults.get('User', None) :
+            user = defaults['User']
+        else :
+            print >>sys.stderr, "No user specified, no default user in config"
+            sys.exit(1)
+
+        if self._args.group is not None :
+            group = self._args.group
+        else :
+            group = defaults.get('Group')
+
+        self._user = User( user, group )
+
+        if self._args.ib_version is not None :
+            self._specs.IronBeeVersion = IbVersion(self._args.ib_version)
+        elif defaults.get('IronBeeVersion', None) :
+            self._specs.IronBeeVersion = IbVersion(defaults.get('IronBeeVersion'))
+
+        if self._args.ib_branch is not None :
+            self._specs.IronBeeGitBranch = self._args.ib_branch
+        else :
+            self._specs.IronBeeGitBranch = defaults.get('IronBeeGitBranch', None)
+
 
     def _SearchFile( self, path, string ) :
         try :
@@ -218,10 +221,16 @@ class _Main( object ) :
         except IOError as e :
             print "Failed to append to file", path, ":", e
 
+    def _Execute( self, cmd ) :
+        if self._parser.Verbose :
+            print "Running:", cmd
+        if self._parser.Execute :
+            subprocess.call( cmd )
+        
     def _SetupSwap( self ) :
         if self._SearchFile( "/proc/mounts", "/swap" ) :
             cmd = ( "/bin/umount", "/swap" )
-            if self.Verbose : print cmd
+            if self._parser.Verbose : print cmd
             subprocess.call( cmd )
         if os.path.exists( '/swap' ) :
             os.rmdir( '/swap' )
@@ -229,14 +238,11 @@ class _Main( object ) :
         if line is None :
             return
         cmd = ( 'sed', '-i', 's|/swap.*|swap swap defaults 0 0|', '/etc/fstab' )
-        if self.Verbose : print cmd
-        subprocess.call( cmd )
+        self._Execute( cmd )
         cmd = ( 'mkswap', line.split(' ')[0] )
-        if self.Verbose : print cmd
-        subprocess.call( cmd )
+        self._Execute( cmd )
         cmd = ( 'swapon', '-a' )
-        if self.Verbose : print cmd
-        subprocess.call( cmd )
+        self._Execute( cmd )
 
     _template_dirs = {
         'home' : '/local',
@@ -246,7 +252,7 @@ class _Main( object ) :
         for name, dest in self._template_dirs.items() :
             src = os.path.join( '/home/qualys/template', name )
             cmd = ( 'rsync', '-av', 'celeborn:'+src, dest )
-            subprocess.call( cmd )
+            self._Execute( cmd )
 
     def _SetupBuildDirs( self, user_name ) :
         # Create and mount /build
@@ -258,15 +264,7 @@ class _Main( object ) :
             self._AppendFile( "/etc/fstab", "/local/build       /build    none    bind    0 0" )
         if not self._SearchFile( "/proc/mounts", "/build" ) :
             cmd = [ "/bin/mount", "/build" ]
-            subprocess.call( cmd )
-
-    def _ArchivePath( self, name, name2, timestamp ) :
-        ib = User.LookUp( "ironbee" )
-        if name2 is None :
-            archive_name = '%s-%s-%s.tar.gz' % ( name, self._args.arch, timestamp )
-        else :
-            archive_name = '%s-ib_%s-%s-%s.tar.gz' % ( name, name2, self._args.arch, timestamp )
-        return os.path.join( ib.Home, 'data', archive_name )
+            self._Execute( cmd )
 
     def _WipeDirs( self, dirpath, dirs ) :
         assert type(dirpath) == str
@@ -289,18 +287,17 @@ class _Main( object ) :
                             os.chmod( fp, stat.S_IRWXU )
                 shutil.rmtree( fullpath )
 
-    def _PopulateDirectory( self, ib_version, timestamp, name, dirpath, user_name,
-                            group=None, wipe=False ) :
-        user = User.LookUp( user_name )
-        if not os.path.exists( dirpath ) :
-            os.makedirs( dirpath )
-            user.ChownDir( "qualys", dirpath )
-        tarball = self._ArchivePath( name, ib_version, timestamp )
+    def _PopulateDirectory( self, build, name, wipe=False ) :
+        archive = build.GetArchive( name )
+        if not os.path.exists( archive.DestDir ) :
+            os.makedirs( archive.DestDir )
+            user.ChownDir( archive.DestDir )
+        tarball = os.path.join( build.ArchiveDirectory, archive.FileName )
         if not os.path.isfile( tarball ) :
             print >>sys.stderr, "Archive", tarball, "doesn not exist"
             sys.exit(1)
         try :
-            print "Populating", dirpath, "from", tarball
+            print "Populating", archive.DestDir, "from", tarball
             regex = re.compile( r'(\.?/)?([^\/]+)/' )
             tar = tarfile.open( tarball )
             top = set()
@@ -312,83 +309,73 @@ class _Main( object ) :
                 m = regex.match( member.name )
                 if m is not None :
                     top.add( m.group(2) )
-            if self.Execute :
+            if self._parser.Execute :
                 if wipe is None or wipe == False :
                     pass
                 elif wipe == True :
-                    self._WipeDirs( dirpath, top )
+                    self._WipeDirs( archive.DestDir, top )
                 elif type(wipe) in (list, tuple) :
-                    self._WipeDirs( dirpath, wipe )
+                    self._WipeDirs( archive.DestDir, wipe )
                 else :
                     assert False, str(wipe)
-                tar.extractall( path=dirpath )
+                tar.extractall( path=archive.DestDir )
                 if os.geteuid() == 0 :
-                    user.ChownDir( "qualys", dirpath )
-            return [tarball]
+                    user.ChownDir( archive.DestDir )
         except tarfile.TarError as e :
             print >>sys.stderr, 'Error extracting from tarball "%s": %s' % ( tarball, e )
             sys.exit(1)
 
-    def _ExtractTarballs( self, version, timestamp ) :
-        tbs = []
-        tbs += self._PopulateDirectory( version, timestamp,
-                                        "build", "/build/qualys",
-                                        self._args.user, "qualys",
-                                        wipe=True )
-        tbs += self._PopulateDirectory( None, timestamp,
-                                        "local", "/local/qualys",
-                                        self._args.user, "qualys",
-                                        wipe=('opt', 'share', 'etc', 'etc.in') )
-        tbs += self._PopulateDirectory( None, timestamp,
-                                        "etc.in", "/local/qualys",
-                                        self._args.user, "qualys", wipe=True )
-        etc = "/local/qualys/etc"
-        if os.path.exists( etc ) :
-            shutil.rmtree( etc )
-        os.makedirs( etc )
-        path = os.path.join(etc, 'tarballs.txt')
-        with open(path, 'w') as fp :
-            for tb in tbs :
-                print >>fp, tb
+    def _ExtractTarballs( self, build ) :
+        self._PopulateDirectory( build, "build",  wipe=True )
+        self._PopulateDirectory( build, "local",  wipe=('opt', 'share', 'etc', 'etc.in') )
+        self._PopulateDirectory( build, "etc-in", wipe=True )
+        etc = os.environ['QLYS_ETC']
+        if self._parser.Execute :
+            if os.path.exists( etc ) :
+                shutil.rmtree( etc )
+            os.makedirs( etc )
+            build.WriteArchiveData( etc )
+
+    def _BuildFilter( self, build ) :
+        if self._specs.IronBeeVersion is not None and \
+           self._specs.IronBeeVersion != build.IronBeeVersion :
+            if self._parser.Verbose >= 2 :
+                print "Skipping build", build.Name, "IronBee versions don't match:", \
+                    self._specs.IronBeeVersion, build.IronBeeVersion
+            return False
+
+        if self._specs.IronBeeGitBranch is not None and \
+           build.IronBeeGitBranch != self._specs.IronBeeGitBranch :
+            if self._parser.Verbose >= 2 :
+                print "Skipping build", build.Name, "IronBee versions don't match:", \
+                    build.IronBeeGitBranch, '!=', self._specs.IronBeeGitBranch
+            return False
+        return True
+            
 
     def _SelectArchive( self ) :
-        if self._args.branch is None :
-            branch = None
-            regex = re.compile( r'ib_([\d\.]+)-\w+-(\d{6}_\d{6})' )
-        else :
-            branch = self._args.branch.replace('-', '_').replace('/', '_')
-            regex = re.compile( r'ib_([\d\.]+:\w+)-\w+-(\d{6}_\d{6})' )
-        if self._args.timestamp is not None :
-            return self._args.ib_version, self._args.timestamp
-
-        if self._args.ib_version.count('.') == 1 :
-            vpat = self._args.ib_version+'.*'
-        elif self._args.ib_version.count('.') == 2 :
-            vpat = self._args.ib_version
-        else :
-            print >>sys.stderr, 'Invalid version string "%s"' % ( self._args.ib_version )
-        if self._args.branch is not None :
-            vpat += ':'+branch
-
-        latest = None
-        timestr = None
-        version = None
-        for archive in glob.glob( self._ArchivePath('*', vpat, '*') ) :
-            match = regex.search( archive )
-            if match is None :
-                continue
-            timestamp = time.strptime( match.group(2), '%y%m%d_%H%M%S' )
-            if latest is None  or  timestamp > latest :
-                latest = timestamp
-                version = match.group(1)
-                timestr = match.group(2)
-        if version is None :
-            print >>sys.stderr, "No archives found!"
-            sys.exit(1)
-        return version,timestr
+        appliances = IbApplianceBuildSet( self._args.builds )
+        appliances.ReadAll( )
+        max_build = None
+        for a in appliances.Builds( self._BuildFilter ) :
+            if max_build is None :
+                max_build = a
+            elif a.IronBeeVersion > max_build.IronBeeVersion :
+                max_build = a
+            elif a.TimeStamp > max_build.TimeStamp :
+                max_build = a
+        if not self._parser.Quiet :
+            print "Selected", max_build.Name
+        return max_build
 
     def Main( self ) :
         self._ParseCmdLine( )
+        self._ReadConfig( )
+        self._MergeConfig( )
+        build = self._SelectArchive( )
+        if build is None :
+            print >>sys.stderr, "No matching archives found!"
+            sys.exit( 1 )
         if os.geteuid() != 0 :
             table = {
                 'setup-homes' : self._args.setup_homes,
@@ -411,16 +398,8 @@ class _Main( object ) :
             self._SetupHomes( )
         if self._args.setup_build :
             self._SetupBuildDirs( self._args.user )
-        version, timestamp = self._SelectArchive( )
-        if version is None or timestamp is None :
-            if timestamp is None :
-                print >>sys.stderr, "No archives matching IronBee", self._args.ib_version, "found"
-            else :
-                print >>sys.stderr, "No archives matching IronBee", \
-                    self._args.ib_version, self._args.timestamp, "found"
-            sys.exit( 1 )
         if self._args.extract :
-            self._ExtractTarballs( version, timestamp )
+            self._ExtractTarballs( build )
 
 main = _Main( )
 main.Main( )
