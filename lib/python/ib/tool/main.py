@@ -23,9 +23,10 @@ import copy
 import glob
 import subprocess
 import argparse
-from ib_dict import *
-from ib_expander import *
-from ib_version import *
+
+from ib.util.dict     import *
+from ib.util.expander import *
+from ib.util.version  import *
 
 class IbToolException(BaseException) : pass
 

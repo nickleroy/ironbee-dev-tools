@@ -20,8 +20,8 @@ import os
 import sys
 from configobj import ConfigObj
 from validate  import Validator, ValidateError
-from ib_version import *
-from ib_appliance_exceptions import *
+from ib.util.version import *
+from ib.appliance.exceptions import *
 
 class IbApplianceConfig( object ) :
     _spec_data = \

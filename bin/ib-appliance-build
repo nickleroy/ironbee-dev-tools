@@ -27,11 +27,12 @@ import shlex
 import tarfile
 import git
 import functools
-from ib_version import *
-from ib_appliance_exceptions import *
-from ib_appliance_build      import *
-from ib_appliance_config     import *
-from ib_appliance_parser     import *
+
+from ib.util.version         import *
+from ib.appliance.exceptions import *
+from ib.appliance.build      import *
+from ib.appliance.config     import *
+from ib.parser.appliance     import *
 
 class DetectionError(BaseException) : pass
 

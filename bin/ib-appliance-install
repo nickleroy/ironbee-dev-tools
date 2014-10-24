@@ -30,10 +30,20 @@ import time
 import shutil
 import tarfile
 import stat
-from ib_appliance_exceptions import *
-from ib_appliance_build      import *
-from ib_appliance_config     import *
-from ib_appliance_parser     import *
+
+try :
+    import ib.util
+except ImportError :
+    path = os.path.realpath(os.path.dirname(os.path.abspath(__file__)))
+    print path
+    libpath = os.path.abspath(os.path.join(path,'../lib/python'))
+    print libpath
+    sys.path.append( libpath )
+
+from ib.appliance.exceptions import *
+from ib.appliance.build      import *
+from ib.appliance.config     import *
+from ib.parser.appliance     import *
 
 class _Parser( IbApplianceParser ) :
     _parts = {

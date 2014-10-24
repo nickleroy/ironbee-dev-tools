@@ -15,37 +15,5 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ****************************************************************************
-import os
-import sys
 
-from ib.tool.main import *
-
-class Main( IbToolMain ) :
-    _nginx_defs = {
-        "FullName"    : "Nginx",
-        "Name"        : "Nginx",
-        "Short"       : "nginx",
-        "NginxVer"    : os.environ["NGINX_VERSION"],
-        "NginxDir"    : os.environ["NGINX_ROOT"],
-        "NginxVar"    : "${NginxDir}/var",
-        "NginxLogDir" : "${NginxVar}/log/nginx",
-        "LogDir"      : "${NginxLogDir}",
-        "NginxEtcIn"  : "${EtcIn}/nginx",
-        "NginxEtc"    : "${Etc}/nginx",
-        "Prog"        : "${NginxDir}/bin/nginx",
-        "Args"        : [ '-c', '${NginxEtc}/nginx.conf' ],
-    }
-
-    def __init__( self ) :
-        IbToolMain.__init__( self, self._nginx_defs )
-        self.AddPrePair( 'Nginx', '${NginxEtcIn}' )
-
-main = Main( )
-main.Main( )
-
-### Local Variables: ***
-### py-indent-offset:4 ***
-### python-indent:4 ***
-### python-continuation-offset:4 ***
-### tab-width:4  ***
-### End: ***
+# Place holder, does nothing.

@@ -17,8 +17,8 @@
 # ****************************************************************************
 import os
 import argparse
-from ib_base_parser     import *
-from ib_appliance_build import *
+from ib.parser.base     import *
+from ib.appliance.build import *
 
 class IbApplianceParser( IbBaseParser ) :
     def __init__( self, description ) :

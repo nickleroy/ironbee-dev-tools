@@ -18,7 +18,7 @@
 import re
 import os
 import sys
-from ib_base_parser import *
+from ib.parser.base import *
 
 class IbArchiverException( BaseException ) : pass
 class IbArchiverRuleError( IbArchiverException ) : pass

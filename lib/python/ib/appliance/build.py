@@ -19,8 +19,8 @@ import re
 import os
 import time
 
-from ib_version              import *
-from ib_appliance_exceptions import *
+from ib.util.version              import *
+from ib.appliance.exceptions import *
 
 # Build appliance
 class IbApplianceBuild( object ) :
