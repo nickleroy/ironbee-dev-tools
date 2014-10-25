@@ -16,10 +16,10 @@
 # limitations under the License.
 # ****************************************************************************
 
-class IbApplianceException( BaseException ) : pass
+class IbHomeVmException( BaseException ) : pass
 
-class IbApplianceDataError( IbApplianceException ) : pass
-class IbApplianceValueError( IbApplianceException ) : pass
+class IbHomeVmDataError( IbHomeVmException ) : pass
+class IbHomeVmValueError( IbHomeVmException ) : pass
 
 
 ### Local Variables: ***

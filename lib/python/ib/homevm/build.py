@@ -19,11 +19,11 @@ import re
 import os
 import time
 
-from ib.util.version              import *
-from ib.appliance.exceptions import *
+from ib.util.version      import *
+from ib.homevm.exceptions import *
 
-# Build appliance
-class IbApplianceBuild( object ) :
+# Build vm
+class IbHomeVmBuild( object ) :
     class _DataItem( object ) :
         def __init__( self, name, required, _type, validator=None, getfn=None ) :
             assert validator is None  or  callable(validator)
@@ -85,35 +85,35 @@ class IbApplianceBuild( object ) :
             else :
                 return True
         except KeyError :
-            raise IbApplianceDataError( 'Attempt to set check attribute "{0}"'.format(name) )
+            raise IbHomeVmDataError( 'Attempt to set check attribute "{0}"'.format(name) )
 
     def __setattr__( self, name, value ) :
         if name.startswith('_'):
-            super(IbApplianceBuild, self).__setattr__(name, value)
+            super(IbHomeVmBuild, self).__setattr__(name, value)
             return
         elif name not in self._item_names :
-            raise IbApplianceDataError( 'Attempt to set invalid attribute "{0}"'.format(name) )
+            raise IbHomeVmDataError( 'Attempt to set invalid attribute "{0}"'.format(name) )
         try :
             item = self._item_names[name]
             converted = item._type( value )
             if not self._CheckValue( name, converted, item ) :
                 raise ValueError
             self._items[name] = converted
-        except ( ValueError, IbApplianceDataError ) :
-            raise IbApplianceValueError( 'Attempt to set "{0}" to invalid value "{1}"'.
+        except ( ValueError, IbHomeVmDataError ) :
+            raise IbHomeVmValueError( 'Attempt to set "{0}" to invalid value "{1}"'.
                                          format(name, str(value)) )
 
     def __getattr__( self, name ) :
         if name not in self._item_names :
-            raise IbApplianceDataError( 'Attempt to access invalid attribute "{0}"'.format(name) )
+            raise IbHomeVmDataError( 'Attempt to access invalid attribute "{0}"'.format(name) )
         return self._items.get(name, None)
 
     def Get( self, name, default=None ) :
         if name not in self._item_names :
-            raise IbApplianceDataError( 'Attempt to access invalid attribute "{0}"'.format(name) )
+            raise IbHomeVmDataError( 'Attempt to access invalid attribute "{0}"'.format(name) )
         return self._items.get(name, default)
 
-    # Appliance time stamp format for strftime()
+    # Vm time stamp format for strftime()
     _TimeStampFormat = '%y%m%d-%H%M%S'
     @classmethod
     def FormatTime( cls, when ) :
@@ -132,7 +132,7 @@ class IbApplianceBuild( object ) :
             self.Name = base
             return base
         except KeyError as e :
-            raise IbApplianceException( "Missing items:"+str(e) )
+            raise IbHomeVmException( "Missing items:"+str(e) )
             
     def GetPath( self, archive_root, filename=None ) :
         base = self._GetBase( )
@@ -152,13 +152,13 @@ class IbApplianceBuild( object ) :
             if rec.Name == name :
                 return rec
         else :
-            raise IbApplianceException( 'No archive named: "{0}"'.format(name) )
+            raise IbHomeVmException( 'No archive named: "{0}"'.format(name) )
 
     def Validate( self ) :
         for name,item in self._item_names.items() :
             value = self.Get(name)
             if item.Required and value is None :
-                raise IbApplianceException( "Missing item: "+name )
+                raise IbHomeVmException( "Missing item: "+name )
             elif value is not None  and  item.Validator is not None :
                 item.Validator(self, value)
 
@@ -190,16 +190,16 @@ class IbApplianceBuild( object ) :
                 else :
                     self.__setattr__(name, value)
         except IOError as e :
-            raise IbApplianceException( 'Failed to read archive file "{0}": {1}'.format(path, e) )
+            raise IbHomeVmException( 'Failed to read archive file "{0}": {1}'.format(path, e) )
 
     @classmethod
     def CreateFromFile( cls, archive_path ) :
         try :
-            appliance = cls( )
-            appliance.ReadArchiveData( archive_path )
-            appliance.Validate( )
-            return appliance
-        except IbApplianceException as e :
+            vm = cls( )
+            vm.ReadArchiveData( archive_path )
+            vm.Validate( )
+            return vm
+        except IbHomeVmException as e :
             print e
             return None
 
@@ -207,16 +207,16 @@ class IbApplianceBuild( object ) :
         return str(self._items)
 
 
-class IbApplianceBuildSet( object ) :
+class IbHomeVmBuildSet( object ) :
     def __init__( self, builds_dir ) :
         self._builds_dir = builds_dir
         self._builds = [ ]
 
     def ReadAll( self ) :
         for name in os.listdir( self._builds_dir ) :
-            appliance = IbApplianceBuild.CreateFromFile( os.path.join(self._builds_dir, name) )
-            if appliance is not None :
-                self._builds.append( appliance )
+            vm = IbHomeVmBuild.CreateFromFile( os.path.join(self._builds_dir, name) )
+            if vm is not None :
+                self._builds.append( vm )
 
     def Builds( self, filter=None ) :
         for build in self._builds :
@@ -225,99 +225,99 @@ class IbApplianceBuildSet( object ) :
         return
 
 if __name__ == "__main__" :
-    data = IbApplianceBuild( )
+    data = IbHomeVmBuild( )
     try :
         data.foo = 'abc'
         assert 0
-    except IbApplianceDataError as e :
+    except IbHomeVmDataError as e :
         pass
 
     try :
         now = time.time()
-        s = IbApplianceBuild.FormatTime( now )
+        s = IbHomeVmBuild.FormatTime( now )
         data.TimeStamp = now
         time.sleep(0.2)
         assert data.TimeStamp == now
         assert data.TimeString == s
-    except IbApplianceDataError as e :
+    except IbHomeVmDataError as e :
         raise
 
     try :
         data.IronBeeVersion = IbVersion('0.11.3')
         assert type(data.IronBeeVersion) == IbVersion
         assert str(data.IronBeeVersion) == '0.11.3'
-    except IbApplianceError as e :
+    except IbHomeVmError as e :
         raise
 
     try :
         data.IronBeeVersion = '0.11.3'
-    except IbApplianceException as e :
+    except IbHomeVmException as e :
         pass
 
     try :
         data.IronBeeGitBranch = "master"
         assert data.IronBeeGitBranch == "master"
-    except IbApplianceException as e :
+    except IbHomeVmException as e :
         raise
 
     try :
         data.IronBeeGitCommit = "7a98ec3b"
         assert data.IronBeeGitCommit == "7a98ec3b"
-    except IbApplianceException as e :
+    except IbHomeVmException as e :
         raise
 
     try :
         data.IronBeeGitCommit = "7a98ec3bx"
         assert 0
-    except IbApplianceValueError as e :
+    except IbHomeVmValueError as e :
         pass
 
     try :
         data.EtcInGitCommit = "520c3a59bd5937e98d650c440337345317744cc0"
         assert data.EtcInGitCommit == "520c3a59bd5937e98d650c440337345317744cc0"
-    except IbApplianceException as e :
+    except IbHomeVmException as e :
         raise
 
     try :
         data.BuildConfig = "/home/nick/devel/qualys/ib/configure"
         assert data.BuildConfig == "/home/nick/devel/qualys/ib/configure"
-    except IbApplianceException as e :
+    except IbHomeVmException as e :
         raise
 
     try :
         data.BuildConfig = "./configure"
         assert data.BuildConfig == "./configure"
-    except IbApplianceException as e :
+    except IbHomeVmException as e :
         raise
 
     try :
         data.BuildConfig = "./xconfigure"
         assert 0
-    except IbApplianceValueError as e :
+    except IbHomeVmValueError as e :
         pass
 
     try :
         data.BuildConfig = "configure"
         assert data.BuildConfig == "configure"
-    except IbApplianceException as e :
+    except IbHomeVmException as e :
         raise
 
     try :
         data.BuildConfig = "/home/nick/devel/qualys/ib/configure --foo=bar"
         assert data.BuildConfig == "/home/nick/devel/qualys/ib/configure --foo=bar"
-    except IbApplianceException as e :
+    except IbHomeVmException as e :
         raise
 
     try :
         data.BuildConfig = "/home/nick/devel/qualys/ib/configurex --foo=bar"
         assert 0
-    except IbApplianceValueError as e :
+    except IbHomeVmValueError as e :
         pass
 
     try :
         data.BuildConfig = "/home/nick/devel/qualys/ib/config --foo=bar"
         assert 0
-    except IbApplianceValueError as e :
+    except IbHomeVmValueError as e :
         pass
 
 ### Local Variables: ***

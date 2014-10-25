@@ -28,17 +28,25 @@ import tarfile
 import git
 import functools
 
-from ib.util.version         import *
-from ib.appliance.exceptions import *
-from ib.appliance.build      import *
-from ib.appliance.config     import *
-from ib.parser.appliance     import *
+from ib.util.version  import *
+from ib.homevm.exceptions import *
+from ib.homevm.build      import *
+from ib.homevm.config     import *
+from ib.parser.homevm     import *
 
 class DetectionError(BaseException) : pass
 
-class _Parser( IbApplianceParser ) :
+class _Parser( IbHomeVmParser ) :
     def __init__( self ) :
-        IbApplianceParser.__init__( self, "Program to build an archive for appliances" )
+        IbHomeVmParser.__init__( self, "Program to build an archive for VMs" )
+
+        self.Parser.add_argument( "--ib-version",
+                                  action="store", dest="ib_version", default=None,
+                                  help="Specify IronBee version to use <auto>" )
+
+        self.Parser.add_argument( "--ib-branch",
+                                  action="store", dest="ib_branch", default=None,
+                                  help="Specify alternate IronBee git branch name <auto>" )
 
         self.Parser.add_argument( "--etc-branch",
                                   action="store", dest="etc_branch", default=None,
@@ -70,7 +78,7 @@ class _Main( object ) :
             self._args.timestamp = time.time()
 
     def _ReadConfig( self ) :
-        config = IbApplianceConfig( self._args.config )
+        config = IbHomeVmConfig( self._args.config )
         self._config = config.Read( )
 
     def _ShowArchiveDir( self ) :
@@ -150,23 +158,23 @@ class _Main( object ) :
 
     def _DetectStuff( self ) :
         try :
-            self._appliance = IbApplianceBuild( )
-            self._appliance.Architecture = self._args.arch
-            self._appliance.Bits = self._args.bits
-            self._appliance.GccVersion = self._DetectGccVersion( )
-            self._appliance.IronBeeVersion = self._DetectIronBeeVersion( )
-            self._appliance.BuildConfig = self._ReadBuildConfig( )
-            if self._appliance.BuildConfig is not None :
-                configure = shlex.split(self._appliance.BuildConfig)[0]
+            self._vm = IbHomeVmBuild( )
+            self._vm.Architecture = self._args.arch
+            self._vm.Bits = self._args.bits
+            self._vm.GccVersion = self._DetectGccVersion( )
+            self._vm.IronBeeVersion = self._DetectIronBeeVersion( )
+            self._vm.BuildConfig = self._ReadBuildConfig( )
+            if self._vm.BuildConfig is not None :
+                configure = shlex.split(self._vm.BuildConfig)[0]
                 self._ib_root = os.path.dirname(configure)
             else :
                 self._ib_root = os.environ['IB_ROOT']
-            (self._appliance.IronBeeGitBranch, self._appliance.IronBeeGitCommit) = \
+            (self._vm.IronBeeGitBranch, self._vm.IronBeeGitCommit) = \
                 self._DetectGitBranch( self._args.ib_branch, self._ib_root)
-            (self._appliance.EtcInGitBranch, self._appliance.EtcInGitCommit) = \
+            (self._vm.EtcInGitBranch, self._vm.EtcInGitCommit) = \
                 self._DetectGitBranch( self._args.etc_branch, os.environ['QLYS_ETC_IN'] )
-            self._appliance.TimeStamp = self._args.timestamp
-            self._archive_dir = self._appliance.GetPath( self._args.builds )
+            self._vm.TimeStamp = self._args.timestamp
+            self._archive_dir = self._vm.GetPath( self._args.builds )
             if not self.Quiet :
                 print 'Archives will be stored in "'+self._archive_dir
         except DetectionError as e:
@@ -229,10 +237,10 @@ class _Main( object ) :
         os.chdir( self._args.build_root )
         tball.add( 'gcc',
                    filter=functools.partial(self._ArchiveFilter, []) )
-        tball.add( 'gcc-'+self._appliance.GccVersion+'/install',
+        tball.add( 'gcc-'+self._vm.GccVersion+'/install',
                    filter=functools.partial(self._ArchiveFilter, []) )
         tball.close( )
-        self._appliance.AddArchive( 'build', 'build.tar.bz2', self._args.build_root )
+        self._vm.AddArchive( 'build', 'build.tar.bz2', self._args.build_root )
 
     _local_ignore_ats = 'trafficserver-'+os.environ['ATS_VERSION'].replace('.', '\.')
     _local_ignore_rules = (
@@ -284,7 +292,7 @@ class _Main( object ) :
         for d in ( 'bin', 'opt', 'share', 'tmp', 'var' ) :
             tball.add( d, filter=functools.partial(self._ArchiveFilter, []) )
         tball.close( )
-        self._appliance.AddArchive( 'local', 'local.tar.bz2', local )
+        self._vm.AddArchive( 'local', 'local.tar.bz2', local )
 
     _etcin_archive_rules = (
         (False, re.compile(r'trafficserver/release')),
@@ -305,10 +313,10 @@ class _Main( object ) :
         tball.add( 'etc.in',
                    filter=functools.partial(self._ArchiveFilter, self._etcin_archive_rules) )
         tball.close( )
-        self._appliance.AddArchive( 'etc-in', 'etc.in.tar.bz2', os.environ['QLYS_LOCAL'] )
+        self._vm.AddArchive( 'etc-in', 'etc.in.tar.bz2', os.environ['QLYS_LOCAL'] )
 
     def _CreateSummary( self ) :
-        self._appliance.WriteArchiveData( self._args.builds )
+        self._vm.WriteArchiveData( self._args.builds )
 
     def _CreateArchives( self ) :
         self._archives = [ ]

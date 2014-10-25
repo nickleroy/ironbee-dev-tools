@@ -31,20 +31,27 @@ import shutil
 import tarfile
 import stat
 
-from ib.appliance.exceptions import *
-from ib.appliance.build      import *
-from ib.appliance.config     import *
-from ib.parser.appliance     import *
+from ib.homevm.exceptions import *
+from ib.homevm.build      import *
+from ib.homevm.config     import *
+from ib.parser.homevm     import *
 
-class _Parser( IbApplianceParser ) :
+class _Parser( IbHomeVmParser ) :
 
     def __init__( self ) :
-        IbApplianceParser.__init__( self, 
+        IbHomeVmParser.__init__( self, 
                                     "Program to install IronBee on a VM host" )
+
+        self.Parser.add_argument( dest="ib_branch", default=None,
+                                  help="Specify alternate IronBee git branch name <None>" )
+
+        self.Parser.add_argument( action="store", dest="ib_version", default=None, nargs='?',
+                                  help="Specify IronBee version to use <None>" )
 
         self.Parser.add_argument( "--user",
                                   action="store", dest="user", default=None,
                                   help='Specify user to setup <default=from config>' )
+
         self.Parser.add_argument( "--group",
                                   action="store", dest="group", default=None,
                                   help='Specify group to setup <default=from config>' )
@@ -57,11 +64,11 @@ class _Main( object ) :
         self._args = self._parser.Parse( )
 
     def _ReadConfig( self ) :
-        config = IbApplianceConfig( self._args.config )
+        config = IbHomeVmConfig( self._args.config )
         self._config = config.Read( )
 
     def _MergeConfig( self ) :
-        self._specs = IbApplianceBuild( )
+        self._specs = IbHomeVmBuild( )
         defaults = self._config['install']['defaults']
 
         if self._args.ib_version is not None :
@@ -178,10 +185,10 @@ class _Main( object ) :
             
 
     def _SelectArchive( self ) :
-        appliances = IbApplianceBuildSet( self._args.builds )
-        appliances.ReadAll( )
+        vms = IbHomeVmBuildSet( self._args.builds )
+        vms.ReadAll( )
         build = None
-        for a in appliances.Builds( self._BuildFilter ) :
+        for a in vms.Builds( self._BuildFilter ) :
             if build is None :
                 build = a
             elif a.IronBeeVersion > build.IronBeeVersion :

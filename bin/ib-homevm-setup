@@ -46,10 +46,8 @@ class _Parser( IbBaseParser ) :
                                "Program to setup IronBee on a VM host" )
 
         self.Parser.add_argument( "user", help='Specify user to setup' )
-
-        self.Parser.add_argument( "--group",
-                                  action="store", dest="group", default=None,
-                                  help='Specify group to setup <default=from config>' )
+        self.Parser.add_argument( "group", default=None, nargs='?',
+                                  help='Specify group to setup' )
 
         self.Parser.add_argument( "--yast",
                                   dest="yast", default=False, action="store_true",

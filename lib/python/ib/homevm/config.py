@@ -20,10 +20,10 @@ import os
 import sys
 from configobj import ConfigObj
 from validate  import Validator, ValidateError
-from ib.util.version import *
-from ib.appliance.exceptions import *
+from ib.util.version      import *
+from ib.homevm.exceptions import *
 
-class IbApplianceConfig( object ) :
+class IbHomeVmConfig( object ) :
     _spec_data = \
                  """
                  [build]
@@ -33,7 +33,7 @@ class IbApplianceConfig( object ) :
                  User             = string
                  Group            = string
                  IronBeeVersion   = string
-                 IronBeeGitBranch = string(default=master)
+                 IronBeeGitBranch = string
                 
                  """.splitlines()
 
@@ -87,7 +87,7 @@ if __name__ == "__main__" :
         }
     }
 
-    config = IbApplianceConfig( '/ignored.conf' )
+    config = IbHomeVmConfig( '/ignored.conf' )
     cfg = config.Read( _config )
     assert cfg == _dict
 

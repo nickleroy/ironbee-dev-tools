@@ -17,16 +17,16 @@
 # ****************************************************************************
 import os
 import argparse
-from ib.parser.base     import *
-from ib.appliance.build import *
+from ib.parser.base import *
+from ib.homevm.build    import *
 
-class IbApplianceParser( IbBaseParser ) :
+class IbHomeVmParser( IbBaseParser ) :
     def __init__( self, description ) :
         IbBaseParser.__init__( self, description )
 
         class TimeAction( argparse.Action ) :
             def __call__( self, parser, namespace, values, option_string=None ) :
-                namespace.timestamp = IbApplianceBuild.FormatTime( values )
+                namespace.timestamp = IbHomeVmBuild.FormatTime( values )
         self.Parser.set_defaults( timestamp=None )
         self.Parser.add_argument( "--timestamp",
                                   action=TimeAction,
@@ -41,14 +41,6 @@ class IbApplianceParser( IbBaseParser ) :
                                   default=int(os.environ['SYS_BITS']),
                                   help="Specify architector to use <"+os.environ['SYS_BITS']+">" )
 
-        self.Parser.add_argument( "--ib-version",
-                                  action="store", dest="ib_version", default=None,
-                                  help="Specify IronBee version to use <auto>" )
-
-        self.Parser.add_argument( "--ib-branch",
-                                  action="store", dest="ib_branch", default=None,
-                                  help="Specify alternate IronBee git branch name <auto>" )
-
         build_root = os.environ['QLYS_BUILD']
         self.Parser.add_argument( "--build-root",
                                           action="store", dest="build_root", default=build_root,
@@ -59,7 +51,7 @@ class IbApplianceParser( IbBaseParser ) :
                                   action="store", dest="builds", default=builds,
                                   help="Specify builds directory <"+builds+">" )
 
-        config = os.path.join(os.environ['QLYS_DEV_ETC'], 'ib-appliance.conf')
+        config = os.path.join(os.environ['QLYS_DEV_ETC'], 'ib-homevm.conf')
         self.Parser.add_argument( "--config",
                                   action="store", dest="config", default=config,
                                   help="Specify configuration file to use <"+config+">" )
