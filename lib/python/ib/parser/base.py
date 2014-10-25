@@ -55,13 +55,11 @@ class IbBaseParser( object ) :
         return self._args
 
     Parser  = property( lambda self : self._parsers[0] )
-    Execute = property( lambda self : self._args.execute )
-    Verbose = property( lambda self : self._args.verbose )
-    Quiet   = property( lambda self : self._args.quiet )
 
 if __name__ == "__main__" :
-    base = IbBaseParser("Test")
-    print base
+    parser = IbBaseParser("Test")
+    args = parser.Parse( )
+    print vars(args)
 
 ### Local Variables: ***
 ### py-indent-offset:4 ***

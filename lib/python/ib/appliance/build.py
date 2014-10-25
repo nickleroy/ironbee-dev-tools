@@ -61,6 +61,7 @@ class IbApplianceBuild( object ) :
         _DataItem( 'IronBeeGitCommit', False, str,
                    lambda cls,value : cls._commit_re.match(value) ),
         _DataItem( 'Architecture',     True,  str ),
+        _DataItem( 'Bits',             True,  int ),
         _DataItem( 'EtcInGitBranch',   True,  str ),
         _DataItem( 'EtcInGitCommit',   False, str,
                    lambda cls,value : cls._commit_re.match(value) ),
@@ -124,9 +125,10 @@ class IbApplianceBuild( object ) :
         if self.Name is not None :
             return self.Name
         try :
-            base = "{:s}-{:s}-{:s}".format(self.IronBeeGitBranch,
-                                           self.IronBeeVersion.Format( ),
-                                           self.TimeString )
+            base = "{:s}-{:s}-{:s}-{:s}".format(self.IronBeeGitBranch,
+                                                self.IronBeeVersion.Format( ),
+                                                self.Architecture,
+                                                self.TimeString )
             self.Name = base
             return base
         except KeyError as e :

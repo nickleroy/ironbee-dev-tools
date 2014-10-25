@@ -31,43 +31,12 @@ import shutil
 import tarfile
 import stat
 
-try :
-    import ib.util
-except ImportError :
-    path = os.path.realpath(os.path.dirname(os.path.abspath(__file__)))
-    print path
-    libpath = os.path.abspath(os.path.join(path,'../lib/python'))
-    print libpath
-    sys.path.append( libpath )
-
 from ib.appliance.exceptions import *
 from ib.appliance.build      import *
 from ib.appliance.config     import *
 from ib.parser.appliance     import *
 
 class _Parser( IbApplianceParser ) :
-    _parts = {
-        'setup_homes' : {
-            "arg"     : 'setup-homes',
-            "default" : False,
-            "help"    : "Setup root and user directories",
-        },
-        'setup_build' : {
-            "arg"     : 'setup-build',
-            "default" : False,
-            "help"    : "Setup build tree",
-        },
-        'setup_swap' : {
-            "arg"     : 'setup-swap',
-            "default" : False,
-            "help"    : "Setup swap space",
-        },
-        'extract' : {
-            "arg"     : 'extract',
-            "default" : True,
-            "help"    : "Extract archives",
-        },
-    }
 
     def __init__( self ) :
         IbApplianceParser.__init__( self, 
@@ -79,97 +48,6 @@ class _Parser( IbApplianceParser ) :
         self.Parser.add_argument( "--group",
                                   action="store", dest="group", default=None,
                                   help='Specify group to setup <default=from config>' )
-
-        class PartsAction(argparse.Action):
-            def __call__(self, parser, namespace, values, option_string=None):
-                if option_string in ("--enable-all", "--init") :
-                    only = False
-                    value = True
-                    arg = None
-                elif option_string.endswith( "-only" ) :
-                    only = True
-                    value = True
-                    arg = option_string[2:-5]
-                elif option_string.startswith( "--no-" ) :
-                    value = False
-                    only = False
-                    arg = option_string[5:]
-                else :
-                    value = True
-                    only = False
-                    arg = option_string[2:]
-
-                for name,part in _Parser._parts.items( ) :
-                    if arg is None  or  arg == part['arg'] :
-                        vars(namespace)[name] = value
-                        for other in _Parser._parts.keys() :
-                            if other != name  and  only :
-                                vars(namespace)[other] = False
-
-        group = self.Parser.add_argument_group( 'Mode', 'Enable for modes of operation' )
-        for name,part in _Parser._parts.items( ) :
-            arg = part['arg']
-            default = part['default']
-            help = part['help'] + ' <default=' + ('Yes' if default else 'No') + '>'
-            group.add_argument( '--'+arg,
-                                action=PartsAction, default=default, nargs=0,
-                                help=help.capitalize() )
-            group.add_argument( '--no-'+arg,
-                                action=PartsAction, nargs=0,
-                                help=('Do not '+help).capitalize() )
-            group.add_argument( '--'+arg+'-only',
-                                action=PartsAction, nargs=0,
-                                help=('Only '+help).capitalize() )
-        group.add_argument( '--enable-all', '--init',
-                            action=PartsAction, nargs=0,
-                            help='Enable all actions' )
-
-class User( object ) :
-    def __init__( self, user_name, group=None ) :
-        self._user_name = user_name
-        pwent = pwd.getpwnam(user_name)
-        assert pwent is not None
-        self._home  = pwent.pw_dir
-        self._uid   = pwent.pw_uid
-        self._setGroup( group, pwent.pw_gid )
-
-    def _setGroup( self, group, gid=None ) :
-        assert group is not None  or  gid is not None
-        if gid is None :
-            gwent = grp.getgrnam(group)
-        else :
-            gwent = grp.getgrgid(gid)
-        assert gwent is not None
-        self._gid        = gwent.gr_gid
-        self._group_name = gwent.gr_name
-
-    Group = property( lambda self : self._group, _setGroup )
-
-    def Chown( self, path ) :
-        os.chown( path, self.Uid, self.Gid )
-
-    def ChownDirs( self, paths ) :
-        cmd = [ "/bin/chown", "-R", ':'.join(self._user_name, self._group_name) ]
-        cmd += list(paths)
-        print "Executing", cmd
-        subprocess.call( cmd )
-
-    def ChownDir( self, path ) :
-        self.ChownDirs( (path,) )
-
-    def SetupHomeDir( self ) :
-        if not os.path.exists( self.Home ) :
-            os.makedirs( self.Home )
-
-    def Finished( self ) :
-        self.ChownDir( None, self._home )
-
-    Name  = property( lambda self : self._user_name )
-    Uid   = property( lambda self : self._uid )
-    Group = property( lambda self : self._group_name )
-    Gid   = property( lambda self : self._gid )
-    Home  = property( lambda self : self._home )
-                
 
 class _Main( object ) :
     def __init__( self ) :
@@ -186,21 +64,6 @@ class _Main( object ) :
         self._specs = IbApplianceBuild( )
         defaults = self._config['install']['defaults']
 
-        if self._args.user is not None :
-            user = self._args.user
-        elif defaults.get('User', None) :
-            user = defaults['User']
-        else :
-            print >>sys.stderr, "No user specified, no default user in config"
-            sys.exit(1)
-
-        if self._args.group is not None :
-            group = self._args.group
-        else :
-            group = defaults.get('Group')
-
-        self._user = User( user, group )
-
         if self._args.ib_version is not None :
             self._specs.IronBeeVersion = IbVersion(self._args.ib_version)
         elif defaults.get('IronBeeVersion', None) :
@@ -211,70 +74,8 @@ class _Main( object ) :
         else :
             self._specs.IronBeeGitBranch = defaults.get('IronBeeGitBranch', None)
 
-
-    def _SearchFile( self, path, string ) :
-        try :
-            fp = open( path )
-            for line in fp :
-                if string in line :
-                    return line
-            else :
-                return None
-        except IOError :
-            return None
-
-    def _AppendFile( self, path, string ) :
-        try :
-            fp = open( path, "a" )
-            print >>fp, string
-            fp.close( )
-        except IOError as e :
-            print "Failed to append to file", path, ":", e
-
-    def _Execute( self, cmd ) :
-        if self._parser.Verbose :
-            print "Running:", cmd
-        if self._parser.Execute :
-            subprocess.call( cmd )
-        
-    def _SetupSwap( self ) :
-        if self._SearchFile( "/proc/mounts", "/swap" ) :
-            cmd = ( "/bin/umount", "/swap" )
-            if self._parser.Verbose : print cmd
-            subprocess.call( cmd )
-        if os.path.exists( '/swap' ) :
-            os.rmdir( '/swap' )
-        line = self._SearchFile( '/etc/fstab', '/swap' )
-        if line is None :
-            return
-        cmd = ( 'sed', '-i', 's|/swap.*|swap swap defaults 0 0|', '/etc/fstab' )
-        self._Execute( cmd )
-        cmd = ( 'mkswap', line.split(' ')[0] )
-        self._Execute( cmd )
-        cmd = ( 'swapon', '-a' )
-        self._Execute( cmd )
-
-    _template_dirs = {
-        'home' : '/local',
-        'root' : '/',
-    }
-    def _SetupHomes( self ) :
-        for name, dest in self._template_dirs.items() :
-            src = os.path.join( '/home/qualys/template', name )
-            cmd = ( 'rsync', '-av', 'celeborn:'+src, dest )
-            self._Execute( cmd )
-
-    def _SetupBuildDirs( self, user_name ) :
-        # Create and mount /build
-        print "Creating /build"
-        for path in ( "/build", "/local/build" ) :
-            if not os.path.exists( path ) :
-                os.makedirs( path )
-        if not self._SearchFile( "/etc/fstab", "/build" ) :
-            self._AppendFile( "/etc/fstab", "/local/build       /build    none    bind    0 0" )
-        if not self._SearchFile( "/proc/mounts", "/build" ) :
-            cmd = [ "/bin/mount", "/build" ]
-            self._Execute( cmd )
+        self._specs.Architecture = self._args.arch
+        self._specs.Bits = self._args.bits
 
     def _WipeDirs( self, dirpath, dirs ) :
         assert type(dirpath) == str
@@ -319,7 +120,7 @@ class _Main( object ) :
                 m = regex.match( member.name )
                 if m is not None :
                     top.add( m.group(2) )
-            if self._parser.Execute :
+            if self.Execute :
                 if wipe is None or wipe == False :
                     pass
                 elif wipe == True :
@@ -340,7 +141,7 @@ class _Main( object ) :
         self._PopulateDirectory( build, "local",  wipe=('opt', 'share', 'etc', 'etc.in') )
         self._PopulateDirectory( build, "etc-in", wipe=True )
         etc = os.environ['QLYS_ETC']
-        if self._parser.Execute :
+        if self.Execute :
             if os.path.exists( etc ) :
                 shutil.rmtree( etc )
             os.makedirs( etc )
@@ -349,34 +150,51 @@ class _Main( object ) :
     def _BuildFilter( self, build ) :
         if self._specs.IronBeeVersion is not None and \
            self._specs.IronBeeVersion != build.IronBeeVersion :
-            if self._parser.Verbose >= 2 :
+            if self.Verbose >= 2 :
                 print "Skipping build", build.Name, "IronBee versions don't match:", \
                     self._specs.IronBeeVersion, build.IronBeeVersion
             return False
 
         if self._specs.IronBeeGitBranch is not None and \
            build.IronBeeGitBranch != self._specs.IronBeeGitBranch :
-            if self._parser.Verbose >= 2 :
+            if self.Verbose >= 2 :
                 print "Skipping build", build.Name, "IronBee versions don't match:", \
                     build.IronBeeGitBranch, '!=', self._specs.IronBeeGitBranch
             return False
+
+        if self._specs.Architecture != build.Architecture :
+            if self.Verbose >= 2 :
+                print "Skipping build", build.Name, "Architectures don't match:", \
+                    build.Architecture, '!=', self._specs.Architecture
+            return False
+
+        if self._specs.Bits != build.Bits :
+            if self.Verbose >= 2 :
+                print "Skipping build", build.Name, "Bits don't match:", \
+                    build.Bits, '!=', self._specs.Bits
+            return False
+
         return True
             
 
     def _SelectArchive( self ) :
         appliances = IbApplianceBuildSet( self._args.builds )
         appliances.ReadAll( )
-        max_build = None
+        build = None
         for a in appliances.Builds( self._BuildFilter ) :
-            if max_build is None :
-                max_build = a
-            elif a.IronBeeVersion > max_build.IronBeeVersion :
-                max_build = a
-            elif a.TimeStamp > max_build.TimeStamp :
-                max_build = a
-        if not self._parser.Quiet :
-            print "Selected", max_build.Name
-        return max_build
+            if build is None :
+                build = a
+            elif a.IronBeeVersion > build.IronBeeVersion :
+                build = a
+            elif a.TimeStamp > build.TimeStamp :
+                build = a
+        if not self.Quiet  and  build is not None:
+            print "Selected", build.Name
+        return build
+
+    Execute = property( lambda self : self._args.execute )
+    Verbose = property( lambda self : self._args.verbose )
+    Quiet   = property( lambda self : self._args.quiet )
 
     def Main( self ) :
         self._ParseCmdLine( )
@@ -386,30 +204,7 @@ class _Main( object ) :
         if build is None :
             print >>sys.stderr, "No matching archives found!"
             sys.exit( 1 )
-        if os.geteuid() != 0 :
-            table = {
-                'setup-homes' : self._args.setup_homes,
-                'setup-build' : self._args.setup_build,
-                'setup-swap' : self._args.setup_swap,
-            }
-            errors = []
-            for n,v in table.items( ) :
-                if v :
-                    errors.append( n )
-            if len(errors) :
-                print >>sys.stderr, \
-                    "This program needs to be run by root to perform selected operations:"
-                for e in errors :
-                    print >>sys.stderr, '\t'+e
-                sys.exit( 1 )
-        if self._args.setup_swap :
-            self._SetupSwap( )
-        if self._args.setup_homes :
-            self._SetupHomes( )
-        if self._args.setup_build :
-            self._SetupBuildDirs( self._args.user )
-        if self._args.extract :
-            self._ExtractTarballs( build )
+        self._ExtractTarballs( build )
 
 main = _Main( )
 main.Main( )

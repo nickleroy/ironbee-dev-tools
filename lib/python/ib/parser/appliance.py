@@ -36,6 +36,11 @@ class IbApplianceParser( IbBaseParser ) :
                                   action="store", dest="arch", default=os.environ['SYS_ARCH'],
                                   help="Specify architector to use <"+os.environ['SYS_ARCH']+">" )
 
+        self.Parser.add_argument( "--bits",
+                                  action="store", dest="bits", type=int,
+                                  default=int(os.environ['SYS_BITS']),
+                                  help="Specify architector to use <"+os.environ['SYS_BITS']+">" )
+
         self.Parser.add_argument( "--ib-version",
                                   action="store", dest="ib_version", default=None,
                                   help="Specify IronBee version to use <auto>" )

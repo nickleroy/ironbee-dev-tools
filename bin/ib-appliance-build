@@ -75,7 +75,7 @@ class _Main( object ) :
 
     def _ShowArchiveDir( self ) :
         print "Archive directory:", self._archive_dir
-        if self._parser.Execute :
+        if self.Execute :
             cmd = ( '/usr/bin/ls', '-lh', self._archive_dir )
             subprocess.call( cmd )
             print "Data:"
@@ -98,9 +98,9 @@ class _Main( object ) :
         for timestamp in timestamps :
             for archive in glob.glob(self._ArchivePath('*', None, timestamp)) :
                 archives.append(archive)
-        if self._parser.Verbose and len(archives):
+        if self.Verbose and len(archives):
             print "Cleaning archives:", archives
-        if self._parser.Execute :
+        if self.Execute :
             for archive in archives :
                 os.remove( archive )
 
@@ -152,6 +152,7 @@ class _Main( object ) :
         try :
             self._appliance = IbApplianceBuild( )
             self._appliance.Architecture = self._args.arch
+            self._appliance.Bits = self._args.bits
             self._appliance.GccVersion = self._DetectGccVersion( )
             self._appliance.IronBeeVersion = self._DetectIronBeeVersion( )
             self._appliance.BuildConfig = self._ReadBuildConfig( )
@@ -166,7 +167,7 @@ class _Main( object ) :
                 self._DetectGitBranch( self._args.etc_branch, os.environ['QLYS_ETC_IN'] )
             self._appliance.TimeStamp = self._args.timestamp
             self._archive_dir = self._appliance.GetPath( self._args.builds )
-            if not self._parser.Quiet :
+            if not self.Quiet :
                 print 'Archives will be stored in "'+self._archive_dir
         except DetectionError as e:
             print >>sys.stderr, "Auto detection failed: ", e
@@ -184,10 +185,10 @@ class _Main( object ) :
         """
         for tf, regex in patterns :
             if regex.search( tinfo.name ) :
-                if tf and self._parser.Verbose :
+                if tf and self.Verbose :
                     print tinfo.name
                 return tinfo if tf else None
-        if self._parser.Verbose >= 2 :
+        if self.Verbose >= 2 :
             print tinfo.name
         return tinfo
 
@@ -211,9 +212,9 @@ class _Main( object ) :
             for (tf, regex) in patterns :
                 if regex.search(path) :
                     ignore = tf
-                    if self._parser.Verbose >= 3 :
+                    if self.Verbose >= 3 :
                         print path+':', ignore, regex.pattern
-                    elif not ignore and self._parser.Verbose >= 2 :
+                    elif not ignore and self.Verbose >= 2 :
                         print path
                     break
             if ignore is True :
@@ -222,7 +223,7 @@ class _Main( object ) :
 
     def _CreateBuildArchive( self ) :
         tpath = os.path.join(self._archive_dir, 'build.tar.bz2')
-        if not self._parser.Quiet :
+        if not self.Quiet :
             print 'Creating build tarball', tpath
         tball = tarfile.TarFile.open( tpath, 'w:bz2' )
         os.chdir( self._args.build_root )
@@ -237,9 +238,11 @@ class _Main( object ) :
     _local_ignore_rules = (
         # ignore?, pattern ..  First match wins
         (True,  re.compile(r'tmp/.*')),
-        (True,  re.compile(r'opt/'+_local_ignore_ats+'/(etc|var|tmp)')),
+        (True,  re.compile(r'opt/'+_local_ignore_ats+'/(etc|var|tmp)/*')),
         (False, re.compile(r'opt/'+_local_ignore_ats+'/(bin|include|lib|share)')),
         (False, re.compile(r'opt/'+_local_ignore_ats+'/?$')),
+        (True,  re.compile(r'opt/(var|tmp|etc)/*')),
+        (False, re.compile(r'opt/(var|tmp|etc)')),
         (True,  re.compile(r'opt/.*')),
         (True,  re.compile(r'etc/trafficserver/.*')),
         (True,  re.compile(r'etc/ironbee/.*')),
@@ -256,21 +259,29 @@ class _Main( object ) :
         tmpdir = os.path.join(os.environ['QLYS_TMP'], 'qualys')
         local = os.environ['QLYS_LOCAL']
         print 'Populating tmp local tree "'+tmpdir+'" from "'+local+'" ...'
-        if self._parser.Execute :
+        if self.Execute :
             if os.path.exists( tmpdir ) :
                 shutil.rmtree( tmpdir )
             shutil.copytree( local, tmpdir,
                              ignore=functools.partial(self._CopyIgnore, self._local_ignore_rules) )
-            varrun = os.path.join(tmpdir, 'var', 'run')
-            if not os.path.exists( varrun ) :
-                os.makedirs( varrun )
+            dirs = (
+                os.path.join(tmpdir, 'var', 'run'),
+                os.path.join(tmpdir, 'var', 'log', 'trafficserver'),
+                os.path.join(tmpdir, 'var', 'trafficserver', 'log'),
+                os.path.join(tmpdir, 'tmp'),
+                os.path.join(tmpdir, 'bin'),
+                os.path.join(tmpdir, 'share'),
+            )
+            for d in dirs :
+                if not os.path.exists( d ) :
+                    os.makedirs( d )
 
         tpath = os.path.join(self._archive_dir, 'local.tar.bz2')
-        if not self._parser.Quiet :
+        if not self.Quiet :
             print 'Creating build tarball', tpath
         tball = tarfile.TarFile.open( tpath, 'w:bz2' )
         os.chdir( tmpdir )
-        for d in ( 'bin', 'opt', 'share', 'tmp' ) :
+        for d in ( 'bin', 'opt', 'share', 'tmp', 'var' ) :
             tball.add( d, filter=functools.partial(self._ArchiveFilter, []) )
         tball.close( )
         self._appliance.AddArchive( 'local', 'local.tar.bz2', local )
@@ -287,7 +298,7 @@ class _Main( object ) :
 
     def _CreateEtcArchive( self ) :
         tpath = os.path.join(self._archive_dir, 'etc.in.tar.bz2')
-        if not self._parser.Quiet :
+        if not self.Quiet :
             print 'Creating build tarball', tpath
         tball = tarfile.TarFile.open( tpath, 'w:bz2' )
         os.chdir( os.environ['QLYS_DEVEL'] )
@@ -301,12 +312,16 @@ class _Main( object ) :
 
     def _CreateArchives( self ) :
         self._archives = [ ]
-        if self._parser.Execute :
+        if self.Execute :
             os.makedirs( self._archive_dir )
         self._CreateBuildArchive( )
         self._CreateEtcArchive( )
         self._CreateLocalArchive( )
         self._CreateSummary( )
+
+    Execute = property( lambda self : self._args.execute )
+    Verbose = property( lambda self : self._args.verbose )
+    Quiet   = property( lambda self : self._args.quiet )
 
     def Main( self ) :
         self._ParseCmdline( )
@@ -317,7 +332,7 @@ class _Main( object ) :
         self._CreateArchives( )
         if self._args.clean :
             self._CleanArchives( verstring )
-        if not self._parser.Quiet :
+        if not self.Quiet :
             self._ShowArchiveDir( )
 
 main = _Main( )
