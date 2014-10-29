@@ -25,6 +25,7 @@ class IbExpander( object ) :
     def __init__( self, defs ) :
         assert isinstance(defs, dict)
         self._defs = defs.copy()
+        self._cache = { }
         self._verbose = 0
 
     def _getVerbose( self ) : return self._verbose
@@ -42,7 +43,11 @@ class IbExpander( object ) :
             initial = copy.copy(args)
             for n,arg in enumerate(args) :
                 for key,value in self._defs.items() :
-                    s = '${'+key+'}'
+                    if key in self._cache :
+                        s = self._cache[key]
+                    else :
+                        s = '${'+key+'}'
+                        self._cache[key] = s
                     c = copy.copy(args)
                     if arg == s  and  type(value) == list :
                         expanded = self.ExpandList(value)
