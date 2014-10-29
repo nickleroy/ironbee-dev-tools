@@ -28,85 +28,10 @@ from ib.util.dict     import *
 from ib.util.expander import *
 from ib.util.version  import *
 
-class IbToolException(BaseException) : pass
-
-class _Tool( object ) :
-    def __init__( self, name, prefix=None, tool_args=None, prog_args=None, defs=None ) :
-        self._name = name
-        self._prefix = self._List( prefix )
-        self._tool_args = self._List( tool_args )
-        self._prog_args = self._List( prog_args )
-        self._defs = defs if defs is not None else { }
-        self._verbose = 0
-        if "ToolName" not in self._defs :
-            self._defs["ToolName"] = name
-        for p in self._prefix :
-            if "${ToolOut}" in p :
-                self._defs["ToolOut"] = "${NameLower}." + name + ".${Run}"
-                break
-        self._defs["DefaultOut"] = "${NameLower}." + name + ".out.${Run}"
-    def SetVerbose( self, v ) :
-        self._verbose = v
-
-    @staticmethod
-    def _List( o ) :
-        if o is None :
-            return ( )
-        elif type(o) in (list, tuple) :
-            return o
-        else :
-            return (o,)
-
-    Defs     = property( lambda self : self._defs )
-    ToolName = property( lambda self : self._defs["ToolName"] )
-    ToolOut  = property( lambda self : self._defs.get("ToolOut", None) )
-    Verbose  = property( lambda self : self._verbose )
-
-    def Prefix( self ) :
-        return self._prefix
-    def ToolArgs( self, args ) :
-        assert type(args) in (list,tuple)
-        return list(args) + list(self._tool_args)
-    def AppendToolArgs( self, args ) :
-        assert type(args) in (list,tuple)
-        self._tool_args += list(args)
-    def ProgArgs( self, args ) :
-        assert type(args) in (list,tuple)
-        return list(args) + list(self._prog_args)
-    def AppendProgArgs( self, args ) :
-        assert type(args) in (list,tuple)
-        self._prog_args += args
-
-
-class _ToolGdb( _Tool ) :
-    _gdb_prefix = ("${ToolName}",)
-    def __init__( self, name ) :
-        _Tool.__init__( self, name,
-                        prefix=self._gdb_prefix,
-                        tool_args="--args" )
-
-class _ToolGdbCore( _Tool ) :
-    _gdb_prefix = ("${ToolName}",)
-    def __init__( self, name ) :
-        _Tool.__init__( self, name,
-                        prefix=self._gdb_prefix,
-                        defs = {'Args':'${CoreFile'} )
-
-class _ToolStrace( _Tool ) :
-    _strace_prefix = ("${ToolName}",
-                      "-o", "${ToolOut}")
-    def __init__( self, name ) :
-        _Tool.__init__( self, name, prefix=self._strace_prefix )
-
-class _ToolValgrind( _Tool ) :
-    _valgrind_prefix = ( "valgrind",
-                         "--tool=${SubTool}",
-                         "--log-file=${ToolOut}")
-    def __init__( self, name, defs, args=None ) :
-        _Tool.__init__( self, name, prefix=self._valgrind_prefix, tool_args=args, defs=defs )
-    def Prefix( self ) :
-        prefix = list(self._prefix) + [ "-v" for i in range(self._verbose) ]
-        return prefix
+import ib.tool.base
+import ib.tool.gdb
+import ib.tool.strace
+import ib.tool.valgrind
 
 class _IbParser( argparse.ArgumentParser ) :
     def SetMain( self, main ) :
@@ -164,23 +89,11 @@ class _CommandList( object ) :
 
 
 class IbToolMain( object ) :
-    _tools = {
-        "none"     : _Tool( "none" ),
-        "gdb"      : _ToolGdb( "gdb" ),
-        "gdb-core" : _ToolGdbCore( "gdb" ),
-        "strace"   : _ToolStrace( "strace" ),
-        "valgrind" : _ToolValgrind("valgrind",
-                                   args=("--leak-check=full",
-                                         "--track-origins=yes",
-                                         "--track-fds=yes",
-                                         "--freelist-vol=200000000",
-                                         "--fair-sched=no"),
-                                   defs={"SubTool":"memcheck"}),
-        "helgrind" : _ToolValgrind("helgrind",
-                                   defs={"SubTool":"helgrind"}),
-        "drd" : _ToolValgrind("drd",
-                              defs={"SubTool":"drd"}),
-    }
+    _tools = { }
+    _tools.update( ib.tool.base.Tools )
+    _tools.update( ib.tool.gdb.Tools )
+    _tools.update( ib.tool.strace.Tools )
+    _tools.update( ib.tool.valgrind.Tools )
 
     _global_defs = {
         "PID"           : str(os.getpid()),
@@ -247,28 +160,28 @@ class IbToolMain( object ) :
         self._parser.add_argument( "--core", action=CoreAction, nargs=1,
                                    help="Specify core file or \"-\" for last" )
 
-        self._parser.add_argument( "--default",
-                                   action="store_const", dest="tool", default="none",
-                                   const="none",
-                                   help="Run %s natively" % (self.Name) )
-        self._parser.add_argument( "--gdb",
-                                   action="store_const", dest="tool", const="gdb",
-                                   help="Run %s under gdb" % (self.Name) )
-        self._parser.add_argument( "--strace",
-                                   action="store_const", dest="tool", const="strace",
-                                   help="Run %s under strace" % (self.Name) )
-        self._parser.add_argument( "--valgrind",
-                                   action="store_const", dest="tool", const="valgrind",
-                                   help="Run %s under valgrind (memcheck)" % (self.Name) )
-        self._parser.add_argument( "--helgrind",
-                                   action="store_const", dest="tool", const="helgrind",
-                                   help="Run %s under helgrind" % (self.Name) )
-        self._parser.add_argument( "--drd",
-                                   action="store_const", dest="tool", const="drd",
-                                   help="Run %s under valgrind/DRD" % (self.Name) )
-        self._parser.add_argument( "--tsan",
-                                   action="store_const", dest="tool", const="tsan",
-                                   help="Run %s under TreadSanitizer" % (self.Name) )
+        tools = self._parser.add_argument_group( 'Tools', 'Tool-related options' )
+        tool_group = tools.add_mutually_exclusive_group( )
+        tool_group.add_argument( "--default",
+                                 action="store_const", dest="tool", default="none",
+                                 const="none",
+                                 help="Run {:1} natively".format(self.Name) )
+        for name in self._tools.keys() :
+            tool_group.add_argument( "--"+name,
+                                     action="store_const", dest="tool", const=name,
+                                     help="Run {:1} under {:2}".format(self.Name, name) )
+
+        self._parser.set_defaults( tool_args=[] )
+        class ToolArgsAction(argparse.Action):
+            def __call__(self, parser, namespace, values, option_string=None):
+                for v in values :
+                    namespace.tool_args += v.split(',')
+        tools.add_argument( "--tool-args",
+                            action=ToolArgsAction, dest="tool_args", nargs=1,
+                            help="Specify list of tool-specific arguments (comma separated)")
+        tools.add_argument( "--tool-arg",
+                            action="append", dest="tool_args",
+                            help="Specify single tool-specific argument")
 
         self._parser.add_argument( "--force-make", "-f",
                                    action="store_true", dest="force_make", default=False,
@@ -338,18 +251,6 @@ class IbToolMain( object ) :
         self._parser.add_argument( "--targets",
                                    action="store", dest="targets", nargs="+",
                                    help="Specify default make targets (in etc directories)")
-
-        self._parser.set_defaults( tool_args=[] )
-        class ToolArgsAction(argparse.Action):
-            def __call__(self, parser, namespace, values, option_string=None):
-                for v in values :
-                    namespace.tool_args += v.split(',')
-        self._parser.add_argument( "--tool-args",
-                                   action=ToolArgsAction, dest="tool_args", nargs=1,
-                                   help="Specify tool arguments (with comma separator)")
-        self._parser.add_argument( "--tool-arg",
-                                   action="append", dest="tool_args",
-                                   help="Specify single tool argument")
 
         self._parser.add_argument( "--out", "-o",
                                    dest="output", type=argparse.FileType('w'), default=None,
