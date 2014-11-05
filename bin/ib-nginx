@@ -18,9 +18,9 @@
 import os
 import sys
 
-from ib.tool.main import *
+from ib.server.main import *
 
-class Main( IbToolMain ) :
+class Main( IbServerMain ) :
     _nginx_defs = {
         "FullName"    : "Nginx",
         "Name"        : "Nginx",
@@ -37,7 +37,7 @@ class Main( IbToolMain ) :
     }
 
     def __init__( self ) :
-        IbToolMain.__init__( self, self._nginx_defs )
+        IbServerMain.__init__( self, self._nginx_defs )
         self.AddPrePair( 'Nginx', '${NginxEtcIn}' )
 
 main = Main( )

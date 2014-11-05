@@ -15,18 +15,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ****************************************************************************
-from ib.tool.base     import *
 
-class IbToolStrace( IbToolBase ) :
-    _strace_prefix = ("${ToolName}",
-                      "-o", "${ToolOut}")
-    def __init__( self, name ) :
-        IbToolBase.__init__( self, name, prefix=self._strace_prefix )
+class IbServerException(BaseException) : pass
 
-Tools = \
-{
-    "strace" : IbToolStrace( "strace" ),
-}
+class IbServerUnknownSite( IbServerException ) : pass
+class IbServerUnknownOption( IbServerException ) : pass
+class IbServerNoGenerator( IbServerException ) : pass
+class IbServerInvalidGenerator( IbServerException ) : pass
+class IbServerNodeError( IbServerException ) : pass
+class IbServerDefError( IbServerException ) : pass
 
 if __name__ == "__main__" :
     assert 0, "not stand-alone"

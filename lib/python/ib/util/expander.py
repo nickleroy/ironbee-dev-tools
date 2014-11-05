@@ -22,9 +22,12 @@ import copy
 import pprint
 
 class IbExpander( object ) :
-    def __init__( self, defs ) :
-        assert isinstance(defs, dict)
-        self._defs = defs.copy()
+    def __init__( self, defs=None ) :
+        assert defs is None or isinstance(defs, dict)
+        if defs is None :
+            self._defs = { }
+        else :
+            self._defs = defs.copy()
         self._cache = { }
         self._verbose = 0
 
@@ -68,6 +71,8 @@ class IbExpander( object ) :
     def ExpandStr( self, s ) :
         if s is None :
             return None
+        else :
+            assert type(s) == str
         expanded = self.ExpandList( [s] )
         if len(expanded) == 1 :
             return expanded[0]
@@ -79,23 +84,46 @@ class IbExpander( object ) :
             return None
         elif type(item) == str :
             return self.ExpandStr( item )
-        else :
+        elif type(item) in (list, tuple) :
             return self.ExpandList( item )
+        else :
+            return item
 
-    def Get( self, name ) :
-        return self._defs.get(name, None)
+    def Get( self, name, default=None ) :
+        assert type(name) == str
+        return self._defs.get(name, default)
 
     def Lookup( self, name ) :
+        assert type(name) == str
         v = self._defs.get(name, None)
         return self.ExpandItem( v )
 
-    def __setitem__(self, k, v):
+    def __setitem__( self, k, v ):
+        assert type(k) == str
         self.Set(k, v)
 
-    def __getitem__(self, k):
+    def __getitem__( self, k ):
+        assert type(k) == str
         return self.Lookup( k )
 
+    def __contains__( self, k ):
+        return k in self._defs
+
+    def Keys( self, filter=None ) :
+        for k, v in self._defs.items( ) :
+            if filter is None or filter(k, v) :
+                yield k
+
+    def KeyValues( self, expand=True, filter=None ) :
+        for k, v in self._defs.items( ) :
+            if filter is None or filter(k, v) :
+                if expand :
+                    yield k, self.ExpandItem( v )
+                else :
+                    yield k, v
+
     def Set( self, name, value, over=True ) :
+        assert type(name) == str
         if name not in self._defs  or  over :
             self._defs[name] = value
 
@@ -105,6 +133,7 @@ class IbExpander( object ) :
             self.Set( name, value, over )
 
     def Append( self, name, value ) :
+        assert type(name) == str
         t = type(self._defs.get(name, None))
         if t is list :
             if type(value) in (list, tuple) :
@@ -120,7 +149,7 @@ class IbExpander( object ) :
         else :
             assert 0, "Don't know how to append to "+str(t)
 
-    def Dump( self, expand ) :
+    def Dump( self, expand, fp=sys.stdout ) :
         print self._defs
         for name in sorted(self._defs.keys()) :
             value = self._defs[name]
@@ -131,7 +160,7 @@ class IbExpander( object ) :
             expanded = value
             if type(value) == str :
                 expanded = self.ExpandStr(value)
-            elif type(value) == int :
+            elif type(value) in (int, bool, float) :
                 pass
             elif type(value) in (list, tuple) :
                 expanded = [ self.ExpandItem(v) for v in value ]
@@ -142,7 +171,42 @@ class IbExpander( object ) :
             else :
                 print >>sys.stderr, "I don't know how to expand", \
                     name, "with type", type(value)
-            print name, "=", expanded
+            print name, "=", expanded, '('+str(type(value))+')'
+
+    def Export( self, fpath ) :
+        with open(fpath, 'w') as f :
+            for k, v in self.KeyValues( ) :
+                print >>f, '{:s}={:s}'.format( k, str(v) )
+            f.close()
+
+    @staticmethod
+    def GetStringValue( s ) :
+        if s == 'True' :
+            return True
+        elif s == 'False' :
+            return False
+        try :
+            return int(s)
+        except ValueError :
+            pass
+        try :
+            return float(s)
+        except ValueError :
+            pass
+        return s
+
+    @classmethod
+    def Import( cls, fpath ) :
+        try :
+            defs = IbExpander( )
+            for n, line in enumerate(open(fpath)) :
+                name, value = line.rstrip().split( '=', 1 )
+                defs[name.strip()] = cls.GetStringValue(value)
+            return defs
+        except IOError as e :
+            raise
+        except ValueError :
+            raise IbServerException("Failed to parse line %d" % (n) )
 
 
 if __name__ == "__main__" :

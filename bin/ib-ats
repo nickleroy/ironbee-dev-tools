@@ -19,39 +19,49 @@ import os
 import sys
 import subprocess
 
-from ib.tool.main import *
+from ib.server.main import *
+from ib.server.dag  import *
 
-class Main( IbToolMain ) :
+class Main( IbServerMain ) :
     _ats_defs = {
-        "FullName"    : "Apache Traffic Server",
-        "Name"        : "ATS",
-        "Short"       : "ts",
-        "AtsVer"      : os.environ["ATS_VERSION"],
-        "AtsDir"      : os.environ["ATS_ROOT"],
-        "AtsVar"      : "${AtsDir}/var",
-        "AtsLogDir"   : "${AtsVar}/log/trafficserver",
-        "LogDir"      : "${AtsLogDir}",
-        "AtsEtcIn"    : "${EtcIn}/trafficserver/working/${AtsVer}",
-        "AtsEtc"      : "${Etc}/trafficserver",
-        "Prog"        : "${AtsDir}/bin/traffic_server",
-        "Trace"       : 'http.*|dns.*|http_hdrs|sdk|ironbee|libloader',
-        "Args"        : [ '-K', '-T${Trace}' ],
-        }
+        "ServerNameFull"  : "Apache Traffic Server",
+        "ServerName"      : "ATS",
+        "ServerNameShort" : "ts",
+        "AtsVersion"      : os.environ["ATS_VERSION"],
+        "AtsRoot"         : os.environ["ATS_ROOT"],
+        "AtsVar"          : "${AtsRoot}/var",
+        "AtsLogDir"       : "${AtsVar}/log/trafficserver",
+        "ServerLogDir"    : "${AtsLogDir}",
+        "AtsEtcInRoot"    : "${EtcIn}/trafficserver",
+        "AtsEtcIn"        : "${AtsEtcInRoot}/working/${AtsVersion}",
+        "AtsEtc"          : "${Etc}/trafficserver",
+        "ServerEtcIn"     : "${AtsEtcInRoot}",
+        "ServerEtc"       : "${AtsEtc}",
+        "ServerGenerator" : "${AtsEtcInRoot}/ts_generator",
+        "TestWikiBase"    : os.environ["TESTWIKI_BASE"],
+        "TestWikiHost"    : os.environ["TESTWIKI_HOST"],
+        "TestWikiUrl"     : os.environ["TESTWIKI_URL"],
+        "Prog"            : "${AtsRoot}/bin/traffic_server",
+        "Trace"           : 'http.*|dns.*|http_hdrs|sdk|ironbee|libloader',
+        "Args"            : [ '-K', '-T${Trace}' ],
+    }
 
     def __init__( self ) :
-        IbToolMain.__init__( self, self._ats_defs )
-        self.AddPrePair( 'ATS', '${AtsEtcIn}' )
+        IbServerMain.__init__( self, self._ats_defs )
 
-        cmds = self._defs.Get('PreCmds')
-        cmds.Create('SetupAts', 5, ('ib-setup-ats',))
+    def SetupToolPreDag( self, dag, tool ) :
+        wipe = dag.add('wipe-ATS', [],
+                       fn=functools.partial( self._WipeConfigDir, 'AtsEtc', 'ATS' ),
+                       phony=True)
+        setup = IbServerDagNodeExe( 'setup-ats', ('ib-setup-ats',), phony=True )
+        dag.add( setup, [wipe] )
+        tool.add( setup )
 
-    def SetupMakeArgs( self ) :
-        IbToolMain.SetupMakeArgs( self )
-        install = self._defs.Lookup('IbInstall')
-        cmd = ['nm', os.path.join(install, 'libexec', 'ts_ironbee.so')]
-        output = subprocess.check_output( cmd )
-        if 'ib_ats_cmd_sock' in output :
-            self._defs.Append("MakeArgs", "IB_ATS_ARGS=-s /tmp/ib-ats-cmdsock")
+    def SetupToolMainDag( self, dag, tool ) :
+        pass
+
+    def SetupToolPostDag( self, dag, tool ) :
+        pass
 
 main = Main( )
 main.Main( )

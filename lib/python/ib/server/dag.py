@@ -15,34 +15,25 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ****************************************************************************
-import os
-import sys
+import dagger.dagger
 
-from ib.server.main import *
+class IbServerDag( dagger.dagger ) :
+    def __init__( self, name ) :
+        dagger.dagger.__init__( self )
+        self._name = name
+        self._stale = None
+    Name = property( lambda self : self._name )
 
-class Main( IbServerMain ) :
-    _httpd_defs = {
-        "FullName"      : "Apache HTTPd",
-        "Name"          : "HTTPd",
-        "Short"         : "httpd",
-        "HttpdVer"      : os.environ["HTTPD_VERSION"],
-        "HttpdDir"      : os.environ["HTTPD_ROOT"],
-        "HttpdLogDir"   : "${BaseLogDir}/httpd",
-        "LogDir"        : "${HttpdLogDir}",
-        "HttpdEtcIn"    : "${EtcIn}/httpd",
-        "HttpdEtc"      : "${Etc}/httpd",
-        "HttpdConf"     : "${Etc}/httpd/httpd.conf",
-        "Prog"          : "${HttpdDir}/bin/httpd",
-        "Args"          : [ "-d", "${HttpdEtc}", "-f" "${HttpdConf}", "-D", "FOREGROUND" ],
-    }
+    def AllStale( self, stale ) :
+        self._stale = stale
 
-    def __init__( self ) :
-        IbServerMain.__init__( self, self._httpd_defs )
-        self.AddPrePair( 'HTTPd', '${HttpdEtcIn}' )
-        self.GetTool("gdb").AppendProgArgs( ("-X",) )
+    def create( self, target, phony=False, stale=None, fn=None ):
+        if stale is None :
+            stale = False if self._stale is None else self._stale
+        return dagger.node( target, phony=phony, stale=stale, fn=fn )
 
-main = Main( )
-main.Main( )
+if __name__ == "__main__" :
+    assert 0, "not stand-alone"
 
 ### Local Variables: ***
 ### py-indent-offset:4 ***

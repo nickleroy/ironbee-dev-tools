@@ -15,7 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ****************************************************************************
-from ib.tool.base     import *
+from ib.server.tool.base import *
 
 class IbToolValgrind( IbToolBase ) :
     _valgrind_prefix = ( "valgrind",

@@ -15,27 +15,5 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ****************************************************************************
-from ib.tool.base import *
 
-class IbToolGdb( IbToolBase ) :
-    _gdb_prefix = ("${ToolName}",)
-    def __init__( self, name ) :
-        IbToolBase.__init__( self, name,
-                             prefix=self._gdb_prefix,
-                             tool_args="--args" )
-
-class IbToolGdbCore( IbToolBase ) :
-    _gdb_prefix = ("${ToolName}",)
-    def __init__( self, name ) :
-        IbToolBase.__init__( self, name,
-                             prefix=self._gdb_prefix,
-                             defs = {'Args':'${CoreFile'} )
-
-Tools = \
-{
-    "gdb"      : IbToolGdb( "gdb" ),
-    "gdb-core" : IbToolGdbCore( "gdb" ),
-}
-
-if __name__ == "__main__" :
-    assert 0, "not stand-alone"
+# Place holder, does nothing.
