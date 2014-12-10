@@ -1,0 +1,159 @@
+#! /usr/bin/env python
+# ****************************************************************************
+# Licensed to Qualys, Inc. (QUALYS) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# QUALYS licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ****************************************************************************
+import re
+import os
+import sys
+import argparse
+import time
+import stat
+import urlparse
+import random
+from BaseHTTPServer import HTTPServer,BaseHTTPRequestHandler
+
+from ib.parser.base import *
+
+_args = None
+_words = None
+
+class _Parser( IbBaseParser ) :
+    def __init__( self ) :
+        IbBaseParser.__init__( self, 
+                               "Simple HTTP server for IronBee testing" )
+
+        self.Parser.add_argument( "--dictfile", '-d',
+                                  dest="dictfile", type=argparse.FileType('r'),
+                                  default=open('/usr/share/dict/words','r'),
+                                  help='Specify dictionary file')
+
+        class CountAction(argparse.Action):
+            __mults = { 'k':1024, 'K':1000,
+                        'm':1024*1024, 'M':1000*1000,
+                        'g':1024*1024*1024, 'G':1000*1000*1000, }
+            __keys = tuple(__mults.keys())
+            def __call__(self, parser, namespace, param, option_string=None):
+                strval = param
+                mult = 1
+                if strval.endswith( self.__keys ) :
+                    mult = self.__mults[strval[-1]]
+                    strval = strval[:-1]
+                try :
+                    value = int(strval) * mult
+                    if option_string in ( '--lines', '-l' ) :
+                        namespace.lines  = value
+                    elif option_string in ( '--size', '-s' ) :
+                        namespace.size  = value
+                    elif option_string in ( '--linesize', '-ls' ) :
+                        namespace.linesize  = value
+                except ValueError :
+                    parser.error( "Invalid value '"+strval+"'" )
+        self.Parser.set_defaults( lines=None )
+        self.Parser.add_argument( "--lines", '-l',
+                                  action=CountAction,
+                                  help="Specify number of lines" )
+        self.Parser.set_defaults( size=None )
+        self.Parser.add_argument( "--size", '-s',
+                                  action=CountAction,
+                                  help="Specify size of file" )
+        self.Parser.set_defaults( linesize=None )
+        self.Parser.add_argument( "--linesize", '-ls',
+                                  action=CountAction,
+                                  help="Specify max line size" )
+
+        self.Parser.add_argument( "--join", '-j',
+                                  action="store", dest="join", default=None,
+                                  help="Specify join string <None>" )
+
+        self.Parser.add_argument( "--sleep",
+                                  action="store", dest="sleep", default=None, type=float,
+                                  help="Specify sleep between lines (seconds) <None>" )
+
+        self.Parser.add_argument( "--port", '-p',
+                                  action="store", dest="port", default=8086, type=int,
+                                  help="Specify port # <8086>" )
+
+
+class Handler(BaseHTTPRequestHandler):
+    def GenerateTextResponse( self ) :
+        assert _words is not None
+        assert _args is not None
+        nlines = 0
+        maxlines = _args.lines
+        size = 0
+        maxsize = _args.size
+        maxline = 1 if _args.linesize is None else _args.linesize
+        join = '' if _args.join is None else _args.join
+
+        start = time.time()
+        while ( maxlines is None or nlines < maxlines ) and ( maxsize is None or size < maxsize ) :
+            now = time.time()
+            line = "{:08d}/{:08.2f}:".format(size, now-start)
+            while len(line) < maxline :
+                line += join + random.choice(_words)
+            line += '\r\n'
+            size += len(line)
+            yield line
+            nlines += 1
+    
+    def do_GET(self):
+        parsed_path = urlparse.urlparse(self.path)
+        self.send_response(200)
+        self.end_headers()
+        for line in self.GenerateTextResponse( ) :
+            self.wfile.write(line)
+            if _args.sleep is not None :
+                time.sleep(_args.sleep)
+        return
+
+class _Main( object ) :
+    def __init__( self ) :
+        self._parser = _Parser( )
+
+    def _ParseCmdLine( self ) :
+        self._args = self._parser.Parse( )
+        global _args
+        _args = self._args
+
+    Execute = property( lambda self : self._args.execute )
+    Verbose = property( lambda self : self._args.verbose )
+    Quiet   = property( lambda self : self._args.quiet )
+
+    def ReadDict( self ) :
+        self._words = [ w.strip() for w in self._args.dictfile.readlines() ]
+        global _words
+        _words = self._words
+
+    def Run( self ) :
+        print 'Listening on port', self._args.port
+        server = HTTPServer(('localhost', self._args.port), Handler)
+        print 'Starting server, use <Ctrl-C> to stop'
+        server.serve_forever()
+
+    def Main( self ) :
+        self._ParseCmdLine( )
+        self.ReadDict( )
+        self.Run( )
+
+main = _Main( )
+main.Main( )
+
+### Local Variables: ***
+### py-indent-offset:4 ***
+### python-indent:4 ***
+### python-continuation-offset:4 ***
+### tab-width:4  ***
+### End: ***
