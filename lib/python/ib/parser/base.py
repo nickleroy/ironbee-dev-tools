@@ -21,6 +21,26 @@ import sys
 import argparse
 
 class IbBaseParser( object ) :
+    class SizeAction(argparse.Action):
+        __mults = { 'k':1024, 'K':1000,
+                    'm':1024*1024, 'M':1000*1000,
+                    'g':1024*1024*1024, 'G':1000*1000*1000, }
+        __keys = tuple(__mults.keys())
+
+        def SetSize( self, parser, namespace, option_string, value ) :
+            assert False
+        def __call__(self, parser, namespace, param, option_string=None):
+            strval = param
+            mult = 1
+            if strval.endswith( self.__keys ) :
+                mult = self.__mults[strval[-1]]
+                strval = strval[:-1]
+            try :
+                value = int(strval) * mult
+                self.SetSize( parser, namespace, option_string, value )
+            except ValueError :
+                parser.error( "Invalid value '"+strval+"'" )
+
     """
     Set up a basic parser for IronBee Python scripts.
     """
