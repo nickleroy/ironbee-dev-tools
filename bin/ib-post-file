@@ -16,9 +16,48 @@
 # limitations under the License.
 # ****************************************************************************
 import urllib2
+from httplib import HTTPConnection
+from array import array
 import mmap
+import time
 
 from ib.parser.base import *
+
+class SlowHttpConnection( HTTPConnection ) :
+    _delay = None
+    _blocksize = 8192
+
+    @classmethod
+    def SetDelay( cls, blocksize, delay ) :
+        cls._blocksize = blocksize
+        cls._delay = delay
+
+    def send( self, data ) :
+        """Send `data' to the server."""
+        if self.sock is None:
+            if self.auto_open:
+                self.connect()
+            else:
+                raise NotConnected()
+
+        if self.debuglevel > 0:
+            print "send:", repr(data)
+        blocksize = self._blocksize
+        if hasattr(data,'read') and not isinstance(data, array):
+            if self.debuglevel > 0: print "sendIng a read()able"
+            datablock = data.read(blocksize)
+            while datablock:
+                if self._delay is not None :
+                    time.sleep( self._delay )
+                self.sock.sendall(datablock)
+                datablock = data.read(blocksize)
+        else:
+            self.sock.sendall(data)
+
+class SlowHttpHandler(urllib2.HTTPHandler):
+
+    def http_open(self, req):
+        return self.do_open(SlowHttpConnection, req)
 
 class _Parser( IbBaseParser ) :
     def __init__( self ) :
@@ -28,6 +67,16 @@ class _Parser( IbBaseParser ) :
         self.Parser.add_argument( "url", help='URL to POST to' )
         self.Parser.add_argument( "infile", type=argparse.FileType('rb'), help='file to POST' )
         self.Parser.add_argument( "content_type", help='Content-type' )
+
+        class SizeAction(IbBaseParser.SizeAction):
+            def SetSize( self, parser, namespace, option_string, value ) :
+                namespace.blocksize  = value
+        self.Parser.add_argument( "--blocksize", "-b",
+                                  action=SizeAction, default=8192,
+                                  help="Max block size to send" )
+        self.Parser.add_argument( "--delay", "-d",
+                                  type=float, default=None,
+                                  help="Delay (in seconds) per block <default=None>" )
 
         self.Parser.add_argument( "max", nargs='?',
                                   type=int, default=1024,
@@ -52,8 +101,11 @@ class _Main( object ) :
         # Do the request
         request = urllib2.Request(self._args.url, mmapped_file_as_string)
         request.add_header("Content-Type", self._args.content_type)
+        SlowHttpConnection.SetDelay( self._args.blocksize, self._args.delay )
+        handler = SlowHttpHandler( )
+        opener = urllib2.build_opener( handler )
         try :
-            response = urllib2.urlopen(request)
+            response = opener.open( request )
             data = response.read()
             if self._args.out is not None :
                 self._args.out.write( data )
