@@ -109,6 +109,7 @@ class IbServerTemplateEngine( object ) :
                                                      RuleIdExtension])
         self._env.filters['ibversion'] = self._IbVersionFilter
         self._env.filters['Map'] = self._IbMapFilter
+        self._env.filters['Size'] = self._SizeFilter
         self._env.tests['rule_enable'] = self._IsRuleEnable
 
     def _IsRuleEnable( self, name ) :
@@ -132,6 +133,21 @@ class IbServerTemplateEngine( object ) :
 
     def SetIbVersion( self, ib_version ) :
         self._ib_version = ib_version
+
+    __mults = { 'k':1024, 'K':1000,
+                'm':1024*1024, 'M':1000*1000,
+                'g':1024*1024*1024, 'G':1000*1000*1000, }
+    __keys = tuple(__mults.keys())
+    @jinja2.contextfilter
+    def _SizeFilter(self, context, value) :
+        mult = 1
+        if value.endswith( self.__keys ) :
+            mult = self.__mults[value[-1]]
+            value = value[:-1]
+        try :
+            return int(value) * mult
+        except ValueError :
+            assert False, 'Invalid size "{:s}"'.format(str(value))
 
     IronBeeVersion = property( lambda self : self._ib_version )
     Defs       = property( lambda self : self._defs )
