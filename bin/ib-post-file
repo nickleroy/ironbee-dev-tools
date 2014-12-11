@@ -64,7 +64,13 @@ class _Parser( IbBaseParser ) :
         IbBaseParser.__init__( self, 
                                "Program do a large post" )
 
-        self.Parser.add_argument( "url", help='URL to POST to' )
+        class UrlAction(argparse.Action):
+            def __call__(self, parser, namespace, values, option_string=None):
+                if ':/' not in  values :
+                    parser.error( 'Invalid URL "{:s}"'.format(values) )
+                else :
+                    namespace.url = values
+        self.Parser.add_argument( "url", action=UrlAction, help='URL to POST to' )
         self.Parser.add_argument( "infile", type=argparse.FileType('rb'), help='file to POST' )
         self.Parser.add_argument( "content_type", help='Content-type' )
 
