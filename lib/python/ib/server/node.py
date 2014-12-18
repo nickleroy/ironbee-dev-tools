@@ -46,7 +46,7 @@ class IbServerDagNodeTemplate( IbServerDagNodeBase ) :
 class IbServerDagNodeDirectory( IbServerDagNodeBase ) :
     def __init__( self, dag, name, generator, dirpath, *args, **kwargs ) : 
         IbServerDagNodeBase.__init__( self, dag, name, generator, path=dirpath, *args, **kwargs )
-        assert type(dirpath) == str
+        assert type(dirpath) == str, 'Type of dirpath is {}, should be str'.format( type(dirpath) )
         self._dirpath = dirpath
 
     def Run( self, node ) :
@@ -58,6 +58,7 @@ class IbServerDagNodeCopy( IbServerDagNodeBase ) :
         IbServerDagNodeBase.__init__( self, dag, name, generator, path=source, *args, **kwargs )
         assert type(source) == str, 'Type of source is {}, should be str'.format( type(source) )
         assert type(dest) == str, 'Type of dest is {}, should be str'.format( type(dest) )
+        assert source != dest, 'Source "{}" is the same as dest "{}"'.format( source, dest )
         self._source = source
         self._dest   = dest
 
@@ -70,6 +71,7 @@ class IbServerDagNodeCopyDir( IbServerDagNodeBase ) :
         IbServerDagNodeBase.__init__( self, dag, name, generator, *args, **kwargs )
         assert type(source) == str, 'Type of source is {}, should be str'.format( type(source) )
         assert type(dest) == str, 'Type of dest is {}, should be str'.format( type(dest) )
+        assert source != dest, 'Source "{}" is the same as dest "{}"'.format( source, dest )
         self._source = source
         self._dest   = dest
 

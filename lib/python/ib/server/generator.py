@@ -19,10 +19,11 @@ import os
 import re
 import shutil
 
-from ib.server.exceptions   import *
-from ib.server.template     import *
-from ib.server.node         import *
-from ib.server.site_options import *
+from ib.server.exceptions      import *
+from ib.server.template        import *
+from ib.server.template_engine import *
+from ib.server.node            import *
+from ib.server.site_options    import *
 
 class IbServerBaseGenerator( IbServerSiteOptions ) :
     def __init__( self, defs, src, dest ) :
@@ -56,8 +57,10 @@ class IbServerBaseGenerator( IbServerSiteOptions ) :
         inpath  = infile  if dirname is None else os.path.join(dirname, infile)
         outpath = outfile if dirname is None else os.path.join(dirname, outfile)
         templater = IbServerTemplate( self._engine, inpath, outpath )
-        node = IbServerDagNodeTemplate( dag, infile, path=os.path.join(self.DestRoot, outpath),
-                                        generator=self, template=templater,
+        node = IbServerDagNodeTemplate( dag, infile,
+                                        path=os.path.join(self.DestRoot, outpath),
+                                        generator=self,
+                                        template=templater,
                                         sources=self._getSources(sources, inpath),
                                         *args, **kwargs )
         return node
@@ -69,21 +72,25 @@ class IbServerBaseGenerator( IbServerSiteOptions ) :
         outpath = outfile if dirname is None else os.path.join(dirname, outfile)
         outfull = os.path.join(self.DestRoot, outpath)
         node = IbServerDagNodeCopy( dag, infile,
-                                    generator=self, source=infull, dest=outfull,
+                                    generator=self,
+                                    source=infull,
+                                    dest=outfull,
                                     sources=self._getSources(sources, inpath),
                                     *args, **kwargs )
         return node
 
     def AddCopyDirNode( self, dag, dirname, *args, **kwargs ) :
         fullsrc = os.path.join(self.SourceRoot, dirname)
-        node = IbServerDagNodeCopyDir( dag, dirname, generator=self,
+        node = IbServerDagNodeCopyDir( dag, dirname,
+                                       generator=self,
                                        source=fullsrc,
                                        dest=os.path.join(self.DestRoot, dirname),
                                        *args, **kwargs )
         return node
 
     def AddDirNode( self, dag, dirname, *args, **kwargs ) :
-        node = IbServerDagNodeDirectory( dag, dirname, generator=self,
+        node = IbServerDagNodeDirectory( dag, dirname,
+                                         generator=self,
                                          dirpath=os.path.join(self.DestRoot, dirname),
                                          *args, **kwargs )
         return node
@@ -147,7 +154,6 @@ class IbServerBaseGenerator( IbServerSiteOptions ) :
         dirnode = self.AddDirNode(dag, dirname, *args, **kwargs)
         if 'parents' in kwargs :
             kwargs['parents'].append(dirnode)
-        # phony = IbDagNode( dag, dirname+"-phony", parents=[dirnode], *args, **kwargs )
 
         srcdir = os.path.join( self.SourceRoot, dirname )
         for name in os.listdir( srcdir ) :
@@ -158,14 +164,18 @@ class IbServerBaseGenerator( IbServerSiteOptions ) :
                 if not recurse :
                     continue
                 node = self.AddDir( dag,
-                                    fpath,
+                                    os.path.join(dirname, name),
                                     recurse=True,
                                     children=[dirnode],
                                     filt=filt,
                                     file_node_fn=file_node_fn,
                                     *args, **kwargs)
             else :
-                node = file_node_fn( dag, dirname, name, children=[dirnode], *args, **kwargs )
+                children = [dirnode]
+                if 'children' in kwargs :
+                    children += kwargs['children']
+                    del kwargs['children']
+                node = file_node_fn( dag, dirname, name, children=children, *args, **kwargs )
 
     def __getitem__( self, attr ) :
         if attr == 'Pre' :

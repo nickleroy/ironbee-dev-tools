@@ -441,9 +441,11 @@ class IbServerMain( object ) :
             self.Parser.error( "No %s binary found" % (self.ServerNameUpper) )
         
     def WipeConfigDir( self, name, pretty, node ) :
-        if self._wipe is False :
-            return 0, None
         path = self._defs.Lookup( name )
+        if self._wipe is False :
+            if self._args.verbose :
+                print 'Wiping {:s} configuration in "{:s}"'.format(pretty, path)
+            return 0, None
         if not self._args.quiet :
             print 'Wiping {:s} configuration in "{:s}"'.format(pretty, path)
         if self._args.execute  and  os.path.isdir( path ) :
