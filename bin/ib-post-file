@@ -21,7 +21,7 @@ from array import array
 import mmap
 import time
 
-from ib.parser.base import *
+from ib.util.parser import *
 
 class SlowHttpConnection( HTTPConnection ) :
     _delay = None

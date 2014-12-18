@@ -228,7 +228,7 @@ if __name__ == "__main__" :
     data = IbHomeVmBuild( )
     try :
         data.foo = 'abc'
-        assert 0
+        assert False
     except IbHomeVmDataError as e :
         pass
 
@@ -268,7 +268,7 @@ if __name__ == "__main__" :
 
     try :
         data.IronBeeGitCommit = "7a98ec3bx"
-        assert 0
+        assert False
     except IbHomeVmValueError as e :
         pass
 
@@ -292,7 +292,7 @@ if __name__ == "__main__" :
 
     try :
         data.BuildConfig = "./xconfigure"
-        assert 0
+        assert False
     except IbHomeVmValueError as e :
         pass
 
@@ -310,13 +310,13 @@ if __name__ == "__main__" :
 
     try :
         data.BuildConfig = "/home/nick/devel/qualys/ib/configurex --foo=bar"
-        assert 0
+        assert False
     except IbHomeVmValueError as e :
         pass
 
     try :
         data.BuildConfig = "/home/nick/devel/qualys/ib/config --foo=bar"
-        assert 0
+        assert False
     except IbHomeVmValueError as e :
         pass
 

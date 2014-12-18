@@ -38,7 +38,7 @@ except ImportError :
     libpath = os.path.abspath(os.path.join(path,'../lib/python'))
     sys.path.append( libpath )
 
-from ib.parser.base import *
+from ib.util.parser import *
 
 class _Parser( IbBaseParser ) :
     def __init__( self ) :

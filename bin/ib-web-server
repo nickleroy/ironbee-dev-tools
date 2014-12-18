@@ -25,7 +25,7 @@ import urlparse
 import random
 from BaseHTTPServer import HTTPServer,BaseHTTPRequestHandler
 
-from ib.parser.base import *
+from ib.util.parser import *
 
 _args = None
 _words = None
