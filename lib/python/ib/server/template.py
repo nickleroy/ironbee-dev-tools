@@ -79,7 +79,7 @@ class IbVersionExtension( jinja2.ext.Extension ) :
         print 'args.expr:', type(args.expr), args.expr
         print 'args.ops:', type(args.ops), args.ops
         for n,op in enumerate(args.ops) :
-            print n,type(op), op
+            print n, type(op), op
         node = jinja2.nodes.Const(True)
         return node
 
@@ -97,7 +97,6 @@ class _RelativeEnvironment(jinja2.Environment):
 
 class IbServerTemplateEngine( object ) :
     def __init__( self, defs, src_root, dst_root ) :
-        print src_root
         paths = [ src_root ]
         self._defs = defs
         self._src_root = src_root
@@ -220,8 +219,11 @@ class IbServerTemplate( object ) :
         print >>fp, text
         fp.close( )
 
+class IbModule_server_template( object ) :
+    modulePath = __file__
+
 if __name__ == "__main__" :
-    assert 0, "not stand-alone"
+    assert False, "not stand-alone"
 
 ### Local Variables: ***
 ### py-indent-offset:4 ***

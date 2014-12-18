@@ -19,114 +19,18 @@ import os
 import re
 import shutil
 
-from ib.server.exceptions import *
-from ib.server.template   import *
-from ib.server.node       import *
+from ib.server.exceptions   import *
+from ib.server.template     import *
+from ib.server.node         import *
+from ib.server.site_options import *
 
-class IbServerBaseGenerator( object ) :
+class IbServerBaseGenerator( IbServerSiteOptions ) :
     def __init__( self, defs, src, dest ) :
-        self._CheckOptions( )
-        self._defs = defs
+        IbServerSiteOptions.__init__( self, defs )
         self._engine = IbServerTemplateEngine( defs, src, dest )
-        self._modes = []
-        self._site_options = { }
-        self._local_options = { }
-
-    def _CheckOptions( self ) :
-        if self._sites is None or self._options is None :
-            return
-        assert all( [type(i) in (tuple,list) for i in self._options.values()] )
-        assert all( [type(i) in (tuple,list) for i in self._sites.values()] )
-        options = set(self._options.keys() )
-        sites = set(self._sites.keys() )
-        assert options.intersection(sites) == set()
-        allnames = options.union(sites)
-        for vlist in self._sites.values( ) :
-            assert all( [key in allnames for key in vlist] )
-        self._option_names = []
-        for name,keys in self._options.items( ) :
-            self._option_names.append( name )
-            for key in keys :
-                if key.startswith( ('-','+') ) :
-                    self._option_names.append( name+'.'+key[1:] )
-                else :
-                    self._option_names.append( name+'.'+key )
 
     SourceRoot     = property( lambda self : self._engine.SourceRoot )
     DestRoot       = property( lambda self : self._engine.DestRoot )
-    Verbose        = property( lambda self : self._defs['Verbose'] )
-    Execute        = property( lambda self : self._defs['Execute'] )
-    Quiet          = property( lambda self : self._defs['Quiet'] )
-    Wipe           = property( lambda self : self._defs['Wipe'] )
-    LocalOptions   = property( lambda self : self._local_options )
-    SiteOptions    = property( lambda self : self._site_options )
-
-    def SetOptions( self, options, is_site ) :
-        optdict = self._site_options if is_site else self._local_options
-        for opt in options :
-            if opt in self._options :
-                item = self._options[opt]
-                if len(item) == 0 :
-                    optdict[opt] = True
-                else :
-                    optdict[opt] = { }
-                    for i in item :
-                        if i.startswith( ('-', '+') ) :
-                            name = i[1:]
-                            enable = i[0] == '+'
-                        else :
-                            name = i[1:]
-                            enable = i[0] == '+'
-                        if not optdict[opt].get( name, False ) :
-                            optdict[opt][name] = enable
-            elif opt in self._option_names :
-                optdict[opt] = True
-            else :
-                raise IbServerUnknownOption(opt)
-
-    def SetSites( self, sites ) :
-        if self._sites is None :
-            return
-        if 'Sites' not in self._defs :
-            self._defs['Sites'] = { }
-        for site in sites :
-            if site not in self._sites :
-                raise IbServerUnknownSite(site)
-            self._defs['Sites'][site] = True
-            for name in self._sites[site] :
-                if name in self._sites :
-                    self.SetSites([name])
-                elif type(name) in (list,tuple) :
-                    self.SetOptions( name, True )
-                else :
-                    self.SetOptions( [name], True )
-
-    def Setup( self, ib_version, sites, options ) :
-        self._engine.SetIbVersion( ib_version )
-        self.SetSites( sites )
-        self.SetOptions( options, False )
-
-        # For any option groups that we're specified, fill in an empty group
-        if self._options is not None :
-            for name in self._options.keys() :
-                if name not in self._site_options :
-                    self._site_options[name] = { }
-        if self.Verbose :
-            print "local options enabled:", self._local_options
-            print "Site options enabled:", self._site_options
-            print "Sites enabled:", self._defs['Sites']
-
-    def IsOptionEnabled( self, name, default=False ) :
-        try :
-            return self._defs['Opts'][name]
-        except KeyError :
-            return default
-
-    def IsSiteEnabled( self, name, default=False ) :
-        try :
-            return self._defs['Sites'][name]
-        except KeyError :
-            return default
 
     def PopulatePreDag( self, dag, root, main, srcdir, destdir ) :
         pass
@@ -140,39 +44,48 @@ class IbServerBaseGenerator( object ) :
     def RenderTemplate( self, template ) :
         template.Render( self )
 
-    def AddTemplateNode( self, dag, dirname, infile, outfile, deps=None ) :
-        if deps is None : deps = []
+    def _getSources( self, sources, inpath ) :
+        if sources is None :
+            return [inpath]
+        else :
+            return list(sources) + [inpath]
+        return sources
+
+    def AddTemplateNode( self, dag, infile, outfile,
+                         name=None, dirname=None, sources=None, *args, **kwargs ) :
         inpath  = infile  if dirname is None else os.path.join(dirname, infile)
         outpath = outfile if dirname is None else os.path.join(dirname, outfile)
         templater = IbServerTemplate( self._engine, inpath, outpath )
-        node = IbServerDagNodeTemplate( os.path.join(self.DestRoot, outpath), self, templater )
-        dag.add( node, deps )
+        node = IbServerDagNodeTemplate( dag, infile, path=os.path.join(self.DestRoot, outpath),
+                                        generator=self, template=templater,
+                                        sources=self._getSources(sources, inpath),
+                                        *args, **kwargs )
         return node
 
-    def AddCopyNode( self, dag, dirname, infile, outfile, deps=None ) :
-        if deps is None : deps = []
+    def AddCopyNode( self, dag, infile, outfile,
+                     name=None, dirname=None, sources=None, *args, **kwargs ) :
         inpath  = infile  if dirname is None else os.path.join(dirname, infile)
+        infull  = os.path.join(self.SourceRoot, inpath)
         outpath = outfile if dirname is None else os.path.join(dirname, outfile)
-        node = IbServerDagNodeCopy( outfile, self,
-                                    os.path.join(self.SourceRoot, inpath),
-                                    os.path.join(self.DestRoot, outpath) )
-        dag.add( node, deps )
+        outfull = os.path.join(self.DestRoot, outpath)
+        node = IbServerDagNodeCopy( dag, infile,
+                                    generator=self, source=infull, dest=outfull,
+                                    sources=self._getSources(sources, inpath),
+                                    *args, **kwargs )
         return node
 
-    def AddCopyDirNode( self, dag, dirname, deps=None ) :
-        if deps is None : deps = []
-        node = IbServerDagNodeCopyDir( dirname, self,
-                                       os.path.join(self.SourceRoot, dirname),
-                                       os.path.join(self.DestRoot, dirname) )
-        dag.add( node, deps )
+    def AddCopyDirNode( self, dag, dirname, *args, **kwargs ) :
+        fullsrc = os.path.join(self.SourceRoot, dirname)
+        node = IbServerDagNodeCopyDir( dag, dirname, generator=self,
+                                       source=fullsrc,
+                                       dest=os.path.join(self.DestRoot, dirname),
+                                       *args, **kwargs )
         return node
 
-    def AddDirNode( self, dag, dirname, deps=None ) :
-        if deps is None : deps = []
-        node = IbServerDagNodeDirectory( dirname,
-                                         self,
-                                         os.path.join(self.DestRoot, dirname) )
-        dag.add( node, deps )
+    def AddDirNode( self, dag, dirname, *args, **kwargs ) :
+        node = IbServerDagNodeDirectory( dag, dirname, generator=self,
+                                         dirpath=os.path.join(self.DestRoot, dirname),
+                                         *args, **kwargs )
         return node
 
     def CreateDir( self, path ) :
@@ -207,12 +120,11 @@ class IbServerBaseGenerator( object ) :
                 'Failed to copy "{:s}" to "{:s}: {:s}'.format(source, dest, str(e))
             )
 
-    def _DefaultFileNodeFn( self, dag, dirname, fname, deps=None ) :
-        if deps is None : deps = []
+    def _DefaultFileNodeFn( self, dag, dirname, fname, *args, **kwargs ) :
         if fname.endswith( '.in' ) :
-            return self.AddTemplateNode( dag, dirname, fname, fname[:-3], deps )
+            return self.AddTemplateNode( dag, fname, fname[:-3], dirname=dirname, *args, **kwargs )
         else :
-            return self.AddCopyNode( dag, dirname, fname, fname, deps )
+            return self.AddCopyNode( dag, fname, fname, dirname=dirname, *args, **kwargs )
 
     def _DefaultFilter( self, name ) :
         if name.endswith( '~' ) or name in ( ('Makefile') ) :
@@ -220,8 +132,8 @@ class IbServerBaseGenerator( object ) :
         else :
             return True
 
-    def AddDir( self, dag, dirname, deps=None, recurse=True,
-                filt=None, file_node_fn=None ) :
+    def AddDir( self, dag, dirname, parents=None, recurse=True,
+                filt=None, file_node_fn=None, *args, **kwargs ) :
         """
         Add a directory, creating a node for each file, including one for the directory
         itself.
@@ -231,11 +143,11 @@ class IbServerBaseGenerator( object ) :
             file_node_fn = self._DefaultFileNodeFn
         if filt is None :
             filt = self._DefaultFilter
-        if deps is None :
-            deps = []
 
-        dirnode = self.AddDirNode(dag, dirname)
-        phony = dag.add( dirname+'-phony', [dirnode], phony=True )
+        dirnode = self.AddDirNode(dag, dirname, *args, **kwargs)
+        if 'parents' in kwargs :
+            kwargs['parents'].append(dirnode)
+        # phony = IbDagNode( dag, dirname+"-phony", parents=[dirnode], *args, **kwargs )
 
         srcdir = os.path.join( self.SourceRoot, dirname )
         for name in os.listdir( srcdir ) :
@@ -245,21 +157,15 @@ class IbServerBaseGenerator( object ) :
             if os.path.isdir( fpath ) :
                 if not recurse :
                     continue
-                nodes = self.AddDir( dag,
-                                     os.path.join(dirname, name),
-                                     deps,
-                                     recurse=True,
-                                     filt=filt,
-                                     file_node_fn=file_node_fn )
-                for node in nodes :
-                    node.add( dirnode )
+                node = self.AddDir( dag,
+                                    fpath,
+                                    recurse=True,
+                                    children=[dirnode],
+                                    filt=filt,
+                                    file_node_fn=file_node_fn,
+                                    *args, **kwargs)
             else :
-                node = file_node_fn( dag, dirname, name )
-                if node is not None :
-                    node.add( dirnode )
-                    node.add( phony )
-
-        return [phony]
+                node = file_node_fn( dag, dirname, name, children=[dirnode], *args, **kwargs )
 
     def __getitem__( self, attr ) :
         if attr == 'Pre' :
@@ -269,13 +175,16 @@ class IbServerBaseGenerator( object ) :
         elif attr == 'Post' :
             return self.PopulatePostDag
         else :
-            assert False, 'Unknown attribute "{:s}"'.format( attr )
+            raise KeyError('Unknown attribute "{:s}"'.format(attr))
 
 def Instantiate( defs ) :
     return _IbGenerator( defs )
 
+class IbModule_server_generator( object ) :
+    modulePath = __file__
+
 if __name__ == "__main__" :
-    assert 0, "not stand-alone"
+    assert False, "not stand-alone"
 
 ### Local Variables: ***
 ### py-indent-offset:4 ***

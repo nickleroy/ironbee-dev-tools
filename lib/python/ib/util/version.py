@@ -464,6 +464,11 @@ if __name__ == "__main__" :
     assert IbVersion('0.11.3') == IbVersion('0.11')
     print "Passed"
 
+class IbModule_util_version( object ) :
+    modulePath = __file__
+
+if __name__ == "__main__" :
+    assert False, "not stand-alone"
 
 ### Local Variables: ***
 ### py-indent-offset:4 ***

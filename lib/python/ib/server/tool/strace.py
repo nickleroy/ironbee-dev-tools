@@ -17,16 +17,26 @@
 # ****************************************************************************
 from ib.server.tool.base import *
 
-class IbToolStrace( IbToolBase ) :
+class IbServerToolStrace( IbServerToolBase ) :
     _strace_prefix = ("${ToolName}",
                       "-o", "${ToolOut}")
     def __init__( self, name ) :
-        IbToolBase.__init__( self, name, prefix=self._strace_prefix )
+        IbServerToolBase.__init__( self, name, prefix=self._strace_prefix )
 
-Tools = \
+IbServerToolStraceTools = \
 {
-    "strace" : IbToolStrace( "strace" ),
+    "strace" : IbServerToolStrace( "strace" ),
 }
 
+class IbModule_server_tool_strace( object ) :
+    modulePath = __file__
+
 if __name__ == "__main__" :
-    assert 0, "not stand-alone"
+    assert False, "not stand-alone"
+
+### Local Variables: ***
+### py-indent-offset:4 ***
+### python-indent:4 ***
+### python-continuation-offset:4 ***
+### tab-width:4  ***
+### End: ***

@@ -147,7 +147,7 @@ class IbExpander( object ) :
         elif t is str :
             self._defs[name] += str(value)
         else :
-            assert 0, "Don't know how to append to "+str(t)
+            assert False, "Don't know how to append to "+str(t)
 
     def Dump( self, expand, fp=sys.stdout ) :
         print self._defs
@@ -266,6 +266,8 @@ if __name__ == "__main__" :
     s = exp.ExpandStr("${PrjBuild}")
     assert s == "/build/nick/project", s
 
+class IbModule_util_expander( object ) :
+    modulePath = __file__
 
 ### Local Variables: ***
 ### py-indent-offset:4 ***

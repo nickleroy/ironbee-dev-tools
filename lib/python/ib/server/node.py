@@ -15,59 +15,73 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ****************************************************************************
-import dagger.dagger
-from ib.server.template  import *
+from ib.util.dag            import *
+from ib.server.template     import *
+from ib.server.site_options import *
 
-class IbServerDagNodeBase( dagger.node ) :
-    def __init__( self, name, generator, *args, **kwargs ) :
-        dagger.node.__init__( self, name, *args, **kwargs )
+class IbServerDagNodeBase( IbDagNode ) :
+    def __init__( self, dag, name, generator, *args, **kwargs ) :
+        IbDagNode.__init__( self, dag, name, recipe=self.Run, *args, **kwargs )
+        assert isinstance(generator, IbServerSiteOptions)
         self._generator = generator
 
 class IbServerDagNodeExe( IbServerDagNodeBase ) :
-    def __init__( self, name, generator, cmd, *args, **kwargs ) : 
-        IbServerDagNodeBase.__init__( self, name, generator, *args, **kwargs )
+    def __init__( self, dag, name, generator, cmd, *args, **kwargs ) : 
+        IbServerDagNodeBase.__init__( self, dag, name, generator, *args, **kwargs )
         self._cmd = cmd
 
-    def run( self ) :
-        pass
+    def Run( self, node ) :
+        return 0, None
 
 class IbServerDagNodeTemplate( IbServerDagNodeBase ) :
-    def __init__( self, name, generator, template, *args, **kwargs ) : 
-        IbServerDagNodeBase.__init__( self, name, generator, *args, **kwargs )
+    def __init__( self, dag, name, generator, template, *args, **kwargs ) : 
+        IbServerDagNodeBase.__init__( self, dag, name, generator, *args, **kwargs )
         assert isinstance(template, IbServerTemplate)
         self._template = template
 
-    def run( self, *args, **kwargs ) :
+    def Run( self, node, *args, **kwargs ) :
         self._generator.RenderTemplate( self._template )
+        return 0, None
 
 class IbServerDagNodeDirectory( IbServerDagNodeBase ) :
-    def __init__( self, name, generator, dirpath, *args, **kwargs ) : 
-        IbServerDagNodeBase.__init__( self, name, generator, *args, **kwargs )
+    def __init__( self, dag, name, generator, dirpath, *args, **kwargs ) : 
+        IbServerDagNodeBase.__init__( self, dag, name, generator, path=dirpath, *args, **kwargs )
+        assert type(dirpath) == str
         self._dirpath = dirpath
 
-    def run( self ) :
+    def Run( self, node ) :
         self._generator.CreateDir( self._dirpath )
+        return 0, None
 
 class IbServerDagNodeCopy( IbServerDagNodeBase ) :
-    def __init__( self, name, generator, source, dest, *args, **kwargs ) : 
-        IbServerDagNodeBase.__init__( self, name, generator, *args, **kwargs )
+    def __init__( self, dag, name, generator, source, dest, *args, **kwargs ) : 
+        IbServerDagNodeBase.__init__( self, dag, name, generator, path=source, *args, **kwargs )
+        assert type(source) == str, 'Type of source is {}, should be str'.format( type(source) )
+        assert type(dest) == str, 'Type of dest is {}, should be str'.format( type(dest) )
         self._source = source
         self._dest   = dest
 
-    def run( self ) :
+    def Run( self, node ) :
         self._generator.CopyFile( self._source, self._dest )
+        return 0, None
 
 class IbServerDagNodeCopyDir( IbServerDagNodeBase ) :
-    def __init__( self, name, generator, source, dest, *args, **kwargs ) : 
-        IbServerDagNodeBase.__init__( self, name, generator, *args, **kwargs )
+    def __init__( self, dag, name, generator, source, dest, *args, **kwargs ) : 
+        IbServerDagNodeBase.__init__( self, dag, name, generator, *args, **kwargs )
+        assert type(source) == str, 'Type of source is {}, should be str'.format( type(source) )
+        assert type(dest) == str, 'Type of dest is {}, should be str'.format( type(dest) )
         self._source = source
         self._dest   = dest
 
-    def run( self ) :
+    def Run( self, node ) :
         self._generator.CopyDir( self._source, self._dest )
+        return 0, None
+
+class IbModule_server_node( object ) :
+    modulePath = __file__
 
 if __name__ == "__main__" :
-    assert 0, "not stand-alone"
+    assert False, "not stand-alone"
 
 ### Local Variables: ***
 ### py-indent-offset:4 ***

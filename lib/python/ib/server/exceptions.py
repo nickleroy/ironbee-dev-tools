@@ -25,5 +25,15 @@ class IbServerInvalidGenerator( IbServerException ) : pass
 class IbServerNodeError( IbServerException ) : pass
 class IbServerDefError( IbServerException ) : pass
 
+class IbModule_server_exceptions( object ) :
+    modulePath = __file__
+
 if __name__ == "__main__" :
-    assert 0, "not stand-alone"
+    assert False, "not stand-alone"
+
+### Local Variables: ***
+### py-indent-offset:4 ***
+### python-indent:4 ***
+### python-continuation-offset:4 ***
+### tab-width:4  ***
+### End: ***

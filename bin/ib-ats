@@ -19,8 +19,9 @@ import os
 import sys
 import subprocess
 
+from ib.util.dag    import *
 from ib.server.main import *
-from ib.server.dag  import *
+from ib.server.node import *
 
 class Main( IbServerMain ) :
     _ats_defs = {
@@ -35,7 +36,7 @@ class Main( IbServerMain ) :
         "AtsEtcInRoot"    : "${EtcIn}/trafficserver",
         "AtsEtcIn"        : "${AtsEtcInRoot}/working/${AtsVersion}",
         "AtsEtc"          : "${Etc}/trafficserver",
-        "ServerEtcIn"     : "${AtsEtcInRoot}",
+        "ServerEtcIn"     : "${AtsEtcIn}",
         "ServerEtc"       : "${AtsEtc}",
         "ServerGenerator" : "${AtsEtcInRoot}/ts_generator",
         "TestWikiBase"    : os.environ["TESTWIKI_BASE"],
@@ -49,19 +50,6 @@ class Main( IbServerMain ) :
     def __init__( self ) :
         IbServerMain.__init__( self, self._ats_defs )
 
-    def SetupToolPreDag( self, dag, tool ) :
-        wipe = dag.add('wipe-ATS', [],
-                       fn=functools.partial( self._WipeConfigDir, 'AtsEtc', 'ATS' ),
-                       phony=True)
-        setup = IbServerDagNodeExe( 'setup-ats', ('ib-setup-ats',), phony=True )
-        dag.add( setup, [wipe] )
-        tool.add( setup )
-
-    def SetupToolMainDag( self, dag, tool ) :
-        pass
-
-    def SetupToolPostDag( self, dag, tool ) :
-        pass
 
 main = Main( )
 main.Main( )

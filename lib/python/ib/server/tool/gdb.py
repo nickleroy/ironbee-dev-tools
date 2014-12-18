@@ -17,25 +17,35 @@
 # ****************************************************************************
 from ib.server.tool.base import *
 
-class IbToolGdb( IbToolBase ) :
+class IbServerToolGdb( IbServerToolBase ) :
     _gdb_prefix = ("${ToolName}",)
     def __init__( self, name ) :
-        IbToolBase.__init__( self, name,
-                             prefix=self._gdb_prefix,
-                             tool_args="--args" )
+        IbServerToolBase.__init__( self, name,
+                                   prefix=self._gdb_prefix,
+                                   tool_args="--args" )
 
-class IbToolGdbCore( IbToolBase ) :
+class IbServerToolGdbCore( IbServerToolBase ) :
     _gdb_prefix = ("${ToolName}",)
     def __init__( self, name ) :
-        IbToolBase.__init__( self, name,
-                             prefix=self._gdb_prefix,
-                             defs = {'Args':'${CoreFile'} )
+        IbServerToolBase.__init__( self, name,
+                                   prefix=self._gdb_prefix,
+                                   defs = {'Args':'${CoreFile'} )
 
-Tools = \
+IbServerToolGdbTools = \
 {
-    "gdb"      : IbToolGdb( "gdb" ),
-    "gdb-core" : IbToolGdbCore( "gdb" ),
+    "gdb"      : IbServerToolGdb( "gdb" ),
+    "gdb-core" : IbServerToolGdbCore( "gdb" ),
 }
 
+class IbModule_server_tool_gdb( object ) :
+    modulePath = __file__
+
 if __name__ == "__main__" :
-    assert 0, "not stand-alone"
+    assert False, "not stand-alone"
+
+### Local Variables: ***
+### py-indent-offset:4 ***
+### python-indent:4 ***
+### python-continuation-offset:4 ***
+### tab-width:4  ***
+### End: ***

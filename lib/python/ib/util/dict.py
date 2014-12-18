@@ -58,6 +58,11 @@ class IbDict( dict ):
         pp = pprint.PrettyPrinter(indent=2)
         return pp.pformat( self )
 
+class IbModule_util_dict( object ) :
+    modulePath = __file__
+
+if __name__ == "__main__" :
+    assert False, "not stand-alone"
 
 ### Local Variables: ***
 ### py-indent-offset:4 ***

@@ -17,3 +17,13 @@
 # ****************************************************************************
 
 # Place holder, does nothing.
+
+if __name__ == "__main__" :
+    assert False, "not stand-alone"
+
+### Local Variables: ***
+### py-indent-offset:4 ***
+### python-indent:4 ***
+### python-continuation-offset:4 ***
+### tab-width:4  ***
+### End: ***

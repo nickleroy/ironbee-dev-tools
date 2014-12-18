@@ -149,3 +149,16 @@ class IbArchiver( _Executor ) :
         tar_cmd = 'cvfj' if self._p.Verbose else 'cfj'
         cmd = [ "/bin/tar", tar_cmd, self._tarball ] + list(targets) + list(ruleset.Rules)
         self.Execute( cmd, cwd=cwd )
+
+class IbModule_util_includeexclude( object ) :
+    modulePath = __file__
+
+if __name__ == "__main__" :
+    assert False, "not stand-alone"
+
+### Local Variables: ***
+### py-indent-offset:4 ***
+### python-indent:4 ***
+### python-continuation-offset:4 ***
+### tab-width:4  ***
+### End: ***

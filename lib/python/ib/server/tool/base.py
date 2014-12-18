@@ -16,7 +16,7 @@
 # limitations under the License.
 # ****************************************************************************
 
-class IbToolBase( object ) :
+class IbServerToolBase( object ) :
     def __init__( self, name, prefix=None, tool_args=None, prog_args=None, defs=None ) :
         self._name = name
         self._prefix = self._ToList( prefix )
@@ -63,11 +63,20 @@ class IbToolBase( object ) :
         assert type(args) in (list,tuple)
         self._prog_args += args
 
-Tools = \
+IbServerToolBaseTools = \
 {
-    "none" : IbToolBase( "none" ),
+    "none" : IbServerToolBase( "none" ),
 }
 
+class IbModule_server_tool_base( object ) :
+    modulePath = __file__
 
 if __name__ == "__main__" :
-    assert 0, "not stand-alone"
+    assert False, "not stand-alone"
+
+### Local Variables: ***
+### py-indent-offset:4 ***
+### python-indent:4 ***
+### python-continuation-offset:4 ***
+### tab-width:4  ***
+### End: ***
