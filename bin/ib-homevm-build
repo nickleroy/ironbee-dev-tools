@@ -175,6 +175,7 @@ class _Main( object ) :
                 self._DetectGitBranch( self._args.etc_branch, os.environ['QLYS_ETC_IN'] )
             self._vm.TimeStamp = self._args.timestamp
             self._archive_dir = self._vm.GetPath( self._args.builds )
+            self._ts_name = 'trafficserver-'+os.environ['ATS_VERSION']
             if not self.Quiet :
                 print 'Archives will be stored in "'+self._archive_dir
         except DetectionError as e:
@@ -242,28 +243,28 @@ class _Main( object ) :
         tball.close( )
         self._vm.AddArchive( 'build', 'build.tar.bz2', self._args.build_root )
 
-    _local_ignore_ats = 'trafficserver-'+os.environ['ATS_VERSION'].replace('.', '\.')
-    _local_ignore_rules = (
-        # ignore?, pattern ..  First match wins
-        (True,  re.compile(r'tmp/.*')),
-        (True,  re.compile(r'opt/'+_local_ignore_ats+'/(etc|var|tmp)/*')),
-        (False, re.compile(r'opt/'+_local_ignore_ats+'/(bin|include|lib|share)')),
-        (False, re.compile(r'opt/'+_local_ignore_ats+'/?$')),
-        (True,  re.compile(r'opt/(var|tmp|etc)/*')),
-        (False, re.compile(r'opt/(var|tmp|etc)')),
-        (True,  re.compile(r'opt/.*')),
-        (True,  re.compile(r'etc/trafficserver/.*')),
-        (True,  re.compile(r'etc/ironbee/.*')),
-        (True,  re.compile(r'nginx')),
-        (True,  re.compile(r'\.(log|blog|git|lock|meta|db|release)')),
-        (True,  re.compile(r'log/(httpd|trafficserver/.*)')),
-        (True,  re.compile(r'data')),
-        (True,  re.compile(r'/core')),
-        (True,  re.compile(r'ats.valgrind.*')),
-        (True,  re.compile(r'crashes')),
-    )
-
     def _CreateLocalArchive( self ) :
+        ignore_ats = self._ts_name.replace('.', '\.')
+        ignore_rules = (
+            # ignore?, pattern ..  First match wins
+            (True,  re.compile(r'tmp/.*')),
+            (True,  re.compile(r'opt/'+ignore_ats+'/(etc|var|tmp)/*')),
+            (False, re.compile(r'opt/'+ignore_ats+'/(bin|include|lib|share)')),
+            (False, re.compile(r'opt/'+ignore_ats+'/?$')),
+            (True,  re.compile(r'opt/(var|tmp|etc)/*')),
+            (False, re.compile(r'opt/(var|tmp|etc)')),
+            (True,  re.compile(r'opt/.*')),
+            (True,  re.compile(r'etc/trafficserver/.*')),
+            (True,  re.compile(r'etc/ironbee/.*')),
+            (True,  re.compile(r'nginx')),
+            (True,  re.compile(r'\.(log|blog|git|lock|meta|db|release)')),
+            (True,  re.compile(r'log/(httpd|trafficserver/.*)')),
+            (True,  re.compile(r'data')),
+            (True,  re.compile(r'/core')),
+            (True,  re.compile(r'ats.valgrind.*')),
+            (True,  re.compile(r'crashes')),
+        )
+
         tmpdir = os.path.join(os.environ['QLYS_TMP'], 'qualys')
         local = os.environ['QLYS_LOCAL']
         print 'Populating tmp local tree "'+tmpdir+'" from "'+local+'" ...'
@@ -271,18 +272,23 @@ class _Main( object ) :
             if os.path.exists( tmpdir ) :
                 shutil.rmtree( tmpdir )
             shutil.copytree( local, tmpdir,
-                             ignore=functools.partial(self._CopyIgnore, self._local_ignore_rules) )
+                             ignore=functools.partial(self._CopyIgnore, ignore_rules) )
             dirs = (
-                os.path.join(tmpdir, 'var', 'run'),
-                os.path.join(tmpdir, 'var', 'log', 'trafficserver'),
-                os.path.join(tmpdir, 'var', 'trafficserver', 'log'),
-                os.path.join(tmpdir, 'tmp'),
-                os.path.join(tmpdir, 'bin'),
-                os.path.join(tmpdir, 'share'),
+                ('var', 'run'),
+                ('var', 'log', 'trafficserver'),
+                ('var', 'trafficserver', 'log'),
+                ('tmp',),
+                ('bin',),
+                ('share',),
             )
             for d in dirs :
-                if not os.path.exists( d ) :
-                    os.makedirs( d )
+                full = os.path.join(tmpdir, *d)
+                if not os.path.exists( full ) :
+                    os.makedirs( full )
+            symlinks = ( 'etc', 'var', 'tmp' )
+            for name in symlinks :
+                os.symlink( os.path.join('../..', name),
+                            os.path.join(tmpdir, 'opt', self._ts_name, name) )
 
         tpath = os.path.join(self._archive_dir, 'local.tar.bz2')
         if not self.Quiet :
@@ -294,24 +300,23 @@ class _Main( object ) :
         tball.close( )
         self._vm.AddArchive( 'local', 'local.tar.bz2', local )
 
-    _etcin_archive_rules = (
-        (False, re.compile(r'trafficserver/release')),
-        (False, re.compile(r'/trafficserver/')),
-        (False, re.compile(r'/tmp')),
-        (False, re.compile(r'/nginx')),
-        (False, re.compile(r'/data')),
-        (False, re.compile(r'\/\.git')),
-        (False, re.compile(r'~$')),
-    )
-
     def _CreateEtcArchive( self ) :
+        archive_rules = (
+            (False, re.compile(r'trafficserver/release')),
+            (False, re.compile(r'/trafficserver/')),
+            (False, re.compile(r'/tmp')),
+            (False, re.compile(r'/nginx')),
+            (False, re.compile(r'/data')),
+            (False, re.compile(r'\/\.git')),
+            (False, re.compile(r'~$')),
+        )
         tpath = os.path.join(self._archive_dir, 'etc.in.tar.bz2')
         if not self.Quiet :
             print 'Creating build tarball', tpath
         tball = tarfile.TarFile.open( tpath, 'w:bz2' )
         os.chdir( os.environ['QLYS_DEVEL'] )
         tball.add( 'etc.in',
-                   filter=functools.partial(self._ArchiveFilter, self._etcin_archive_rules) )
+                   filter=functools.partial(self._ArchiveFilter, archive_rules) )
         tball.close( )
         self._vm.AddArchive( 'etc-in', 'etc.in.tar.bz2', os.environ['QLYS_LOCAL'] )
 
