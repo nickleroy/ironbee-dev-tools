@@ -20,6 +20,7 @@ import os
 import sys
 import argparse
 
+
 class IbBaseParser( object ) :
     class SizeAction(argparse.Action):
         __mults = { 'k':1024, 'K':1000,
@@ -49,7 +50,7 @@ class IbBaseParser( object ) :
             description=description,
             prog=os.path.basename(sys.argv[0]) )
         self._parser = parser
-        
+
         group = self.Parser.add_argument_group( )
         parser.add_argument( "--execute",
                              action="store_true", dest="execute", default=True,
@@ -72,6 +73,9 @@ class IbBaseParser( object ) :
         return self._args
 
     Parser  = property( lambda self : self._parser )
+
+    def Error( self, text ) :
+        self._parser.error( text )
 
 if __name__ == "__main__" :
     parser = IbBaseParser("Test")
