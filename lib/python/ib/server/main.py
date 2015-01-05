@@ -51,12 +51,9 @@ from ib.server.tool.gdb      import *
 from ib.server.tool.strace   import *
 from ib.server.tool.valgrind import *
 
-# Main object
-_main = None
-
 class _ServerParser( IbBaseParser ) :
-    def __init__( self ) :
-        IbBaseParser.__init__( self, "Run "+_main.ServerNameFull+" with IronBee" )
+    def __init__( self, main ) :
+        IbBaseParser.__init__( self, "Run "+main.ServerNameFull+" with IronBee" )
 
         group = self.Parser.add_argument_group( )
         group.add_argument( "sites", type=str, nargs='+', default=[],
@@ -85,11 +82,11 @@ class _ServerParser( IbBaseParser ) :
         tool_group.add_argument( "--default",
                                  action="store_const", dest="tool", default="none",
                                  const="none",
-                                 help="Run {:1} natively".format(_main.ServerName) )
-        for name in _main.Tools.keys() :
+                                 help="Run {:1} natively".format(main.ServerName) )
+        for name in main.Tools.keys() :
             tool_group.add_argument( "--"+name,
                                      action="store_const", dest="tool", const=name,
-                                     help="Run {:1} under {:2}".format(_main.ServerName, name) )
+                                     help="Run {:1} under {:2}".format(main.ServerName, name) )
 
         self.Parser.set_defaults( tool_args=[] )
         class ToolArgsAction(argparse.Action):
@@ -110,8 +107,8 @@ class _ServerParser( IbBaseParser ) :
                     namespace.defs['IbEtc'] = None
                     namespace.defs['IbConfig'] = values[0]
                 elif len(values) == 0 :
-                    namespace.defs['IbEtcIn'] = _main.Defs.Lookup("RnsEtcIn")
-                    namespace.defs['IbGenerator'] = _main.Defs.Lookup("RnsGenerator")
+                    namespace.defs['IbEtcIn'] = main.Defs.Lookup("RnsEtcIn")
+                    namespace.defs['IbGenerator'] = main.Defs.Lookup("RnsGenerator")
                 else :
                     namespace.defs['IbEtcIn'] = values[0]
         group.add_argument( "--rns", action=IbAction, nargs=0,
@@ -130,15 +127,15 @@ class _ServerParser( IbBaseParser ) :
         group = self.Parser.add_argument_group( )
         group.add_argument( "--ib-log-level",
                             dest="log_level", type=str, default=None,
-                            choices=LogLevels(_main._log_levels),
+                            choices=LogLevels(main._log_levels),
                             help='Specify IronBee log level')
         group.add_argument( "--rule-log-level",
                             dest="rule_log_level", type=str, default=None,
-                            choices=LogLevels(_main._log_levels),
+                            choices=LogLevels(main._log_levels),
                             help='Specify IronBee rule log level')
         group.add_argument( "--rule-debug-level",
                             dest="rule_debug_level", type=str, default=None,
-                            choices=LogLevels(set(_main._rule_debug_level_map)),
+                            choices=LogLevels(set(main._rule_debug_level_map)),
                             help='Specify IronBee rule debug level')
 
         self.Parser.set_defaults( wipe=None )
@@ -152,7 +149,7 @@ class _ServerParser( IbBaseParser ) :
 
         self.Parser.add_argument( "--clear-logs", "-c",
                                    action="store_true", dest="clear_logs", default=False,
-                                   help="Clear log files before starting %s" % (_main.ServerName) )
+                                   help="Clear log files before starting %s" % (main.ServerName) )
 
         group = self.Parser.add_argument_group( )
         group.add_argument( "--out", "-o",
@@ -173,7 +170,7 @@ class _ServerParser( IbBaseParser ) :
                             help="Disable running of pre-commands")
         group.add_argument( "--disable-main", "--no-main",
                             action="store_false", dest="main", default=True,
-                            help="Disable running of "+_main.ServerName )
+                            help="Disable running of "+main.ServerName )
         group.add_argument( "--disable-post", "--no-post",
                             action="store_false", dest="postcmds", default=True,
                             help="Disable running of post-commands")
@@ -203,9 +200,11 @@ class _ServerParser( IbBaseParser ) :
                 if 'enable' in option_string :
                     namespace.defs['IbEtc'] = '${EtcIn}/ironbee' # Restore default
                     namespace.defs['IbEnable'] = True
+                    namespace.ib_enable = True
                 else :
                     namespace.defs['IbEtc'] = None
                     namespace.defs['IbEnable'] = False
+                    namespace.ib_enable = False
         group.add_argument( "--enable-ib", action=IbEnableAction, nargs=0,
                             help="Disable IronBee" )
         group.add_argument( "--disable-ib", action=IbEnableAction, nargs=0,
@@ -260,37 +259,49 @@ class _ServerParser( IbBaseParser ) :
 
 
 class _ServerDags( IbServerDags ) :
-    def __init__( self ):
-        root = IbDag('Root', auto_add_modules=_main._args.auto_add_modules)
+    def __init__( self, main ):
+        self._main = main
+        root = IbDag('Root', auto_add_modules=self._main._args.auto_add_modules)
         IbServerDags.__init__( self, root )
 
     def PopulateWipeIronbee( self, dag ) :
-        IbDagNode( dag, 'wipe-Ironbee', recipe=partial(_main.WipeConfigDir, 'IbEtc', 'IronBee') )
+        IbDagNode( dag, 'wipe-Ironbee',
+                   recipe=partial(self._main.WipeConfigDir, 'IbEtc', 'IronBee') )
 
     def PopulateWipeServer( self, dag ) :
-        IbDagNode( dag, 'wipe-Server', recipe=partial(_main.WipeConfigDir, 'ServerEtc', 'Server') )
+        IbDagNode( dag, 'wipe-Server',
+                   recipe=partial(self._main.WipeConfigDir, 'ServerEtc', 'Server') )
 
     def PopulatePreIronbee( self, dag ) :
-        _main.ImportDag( dag, 'IbGenerator', 'IbEtcIn', 'IbEtc' )
+        if self._main._args.ib_enable :
+            self._main.ImportDag( dag, 'IbGenerator', 'IbEtcIn', 'IbEtc' )
 
     def PopulatePreServer( self, dag ) :
-        _main.ImportDag( dag, 'ServerGenerator', 'ServerEtcIn', 'ServerEtc' )
-        clear = IbDagNode( dag, 'clear-logs', recipe=_main.ClearLogs )
-        logdirs = IbDagNode( dag, 'make-logs', parents=[clear], recipe=_main.CreateLogDirs )
+        self._main.ImportDag( dag, 'ServerGenerator', 'ServerEtcIn', 'ServerEtc' )
+        vardirs = IbDagNode( dag, 'create-var-dirs',
+                             always=True, is_default_target=True,
+                             recipe=self._main.CreateVarDirs )
+        clear = IbDagNode( dag, 'clear-logs',
+                           always=True, is_default_target=True, parents=[vardirs],
+                           recipe=self._main.ClearLogs )
 
     def PopulateMainIronbee( self, dag ) :
-        _main.ImportDag( dag, 'IbGenerator' )
+        if self._main._args.ib_enable :
+            self._main.ImportDag( dag, 'IbGenerator' )
 
     def PopulateMainServer( self, dag ) :
-        _main.ImportDag( dag, 'ServerGenerator' )
-        main = IbDagNode( dag, 'main', always=True, recipe=_main.RunMain )
+        self._main.ImportDag( dag, 'ServerGenerator' )
+        main = IbDagNode( dag, 'main', always=True, is_default_target=True,
+                          recipe=self._main.RunMain )
 
     def PopulatePostIronbee( self, dag ) :
-        _main.ImportDag( dag, 'IbGenerator' )
+        if self._main._args.ib_enable :
+            self._main.ImportDag( dag, 'IbGenerator' )
 
     def PopulatePostServer( self, dag ) :
-        _main.ImportDag( dag, 'ServerGenerator' )
-        IbDagNode( dag, 'write-last', recipe=_main.WriteLastFile )
+        self._main.ImportDag( dag, 'ServerGenerator' )
+        IbDagNode( dag, 'write-last',
+                   recipe=self._main.WriteLastFile )
 
 
 _Generator = collections.namedtuple( 'Generator', ( 'Name', 'Module', 'Generator' ) )
@@ -314,6 +325,7 @@ class IbServerMain( object ) :
         "Devel"            : os.environ["QLYS_DEVEL"],
         "Var"              : os.environ.get("QLYS_VAR", "${Devel}/var"),
         "BaseLogDir"       : "${Var}/log",
+        "VarRun"           : "${Var}/run",
         "Etc"              : os.environ.get("QLYS_ETC", "${Devel}/etc"),
         "EtcIn"            : os.environ.get("QLYS_ETC_IN", "${Devel}/etc.in"),
         "Tmp"              : os.environ["QLYS_TMP"],
@@ -373,8 +385,6 @@ class IbServerMain( object ) :
         self._defs.Set( "ServerNameUpper", name.upper() )
         self._wipe = False
         self._generators = { }
-        global _main
-        _main = self
 
     IronBeeVersion  = property(lambda self : self._ib_version)
     ServerNameFull  = property(lambda self : self._defs.Lookup("ServerNameFull"))
@@ -408,9 +418,6 @@ class IbServerMain( object ) :
                 assert False, 'No matching rule debug level for level "{:s}"'. \
                     format(log_level)
 
-    def _ParserSetup( self ) :
-        self._parser = _ServerParser( )
-
     def _Parse( self ) :
         self._args = self.Parser.Parse()
         if self._args.write_last is None :
@@ -422,7 +429,7 @@ class IbServerMain( object ) :
         libdir = self._defs.Lookup( 'IbLibDir' )
         tmp = IbVersionReader.FindFile( libdir )
         if tmp is None :
-            self.Parser.error( 'Unable to find library file in "'+libdir+'"' )
+            self.Parser.Error( 'Unable to find library file in "'+libdir+'"' )
         self._args.path = tmp
         vreader = IbVersionReader( )
         version = vreader.GetAutoVersion( self._args.path )
@@ -438,13 +445,15 @@ class IbServerMain( object ) :
                 self._defs.Set("Executable", p)
                 break
         else :
-            self.Parser.error( "No %s binary found" % (self.ServerNameUpper) )
+            self.Parser.Error( "No %s binary found" % (self.ServerNameUpper) )
         
     def WipeConfigDir( self, name, pretty, node ) :
         path = self._defs.Lookup( name )
+        if path is None :
+            return 0, None
         if self._wipe is False :
             if self._args.verbose :
-                print 'Wiping {:s} configuration in "{:s}"'.format(pretty, path)
+                print 'Not wiping {:s} configuration in "{:s}"'.format(pretty, path)
             return 0, None
         if not self._args.quiet :
             print 'Wiping {:s} configuration in "{:s}"'.format(pretty, path)
@@ -469,8 +478,8 @@ class IbServerMain( object ) :
                 shutil.rmtree( logdir )
         return 0, None
 
-    def CreateLogDirs( self, node ) :
-        for name in ( 'LogDir', 'IbLogDir', 'ServerLogDir' ) :
+    def CreateVarDirs( self, node ) :
+        for name in ( 'LogDir', 'IbLogDir', 'ServerLogDir', 'VarRun' ) :
             logdir = self._defs.Lookup( name )
             if logdir is not None  and  not os.path.isdir( logdir ) :
                 os.makedirs( logdir )
@@ -536,9 +545,9 @@ class IbServerMain( object ) :
             print >>sys.stderr, 'Invalid generator: {:s}'.format( str(e) )
             sys.exit(1)
         except IbServerUnknownSite as e :
-            self.Parser.error( 'Unknown site "{:s}"'.format( str(e) ) )
+            self.Parser.Error( 'Unknown site "{:s}"'.format( str(e) ) )
         except IbServerUnknownOption as e :
-            self.Parser.error( 'Unknown option "{:s}"'.format( str(e) ) )
+            self.Parser.Error( 'Unknown option "{:s}"'.format( str(e) ) )
 
     def _WipeNames( self ) :
         regex = re.compile( r'(EtcIn|Enable|Generator|Level|Version|Install|LibDir|Mode)' )
@@ -547,10 +556,10 @@ class IbServerMain( object ) :
 
     def _PostParse( self ) :
         # Setup DAGs, hostname, etc
-        self._dags = _ServerDags( )
+        self._dags = _ServerDags( self )
 
         if "IF_"+self._args.interface+"_IPADDR" not in os.environ :
-            self.Parser.error( 'Invalid interface "'+self._args.interface+'" specified' )
+            self.Parser.Error( 'Invalid interface "'+self._args.interface+'" specified' )
 
         hmap = {
             "HOST":"Hostname",
@@ -638,7 +647,7 @@ class IbServerMain( object ) :
         else :
             self._last_defs = IbExpander( )
         if self._args.require_core  and  'CoreFile' not in self._defs :
-            self.Parser.error( "No core file specified" )
+            self.Parser.Error( "No core file specified" )
         if self._args.wipe is None :
             for name in self._WipeNames( ) :
                 if self._defs.Lookup(name) != self._last_defs.Get(name) :
@@ -730,7 +739,7 @@ class IbServerMain( object ) :
         return self._tools[name]
 
     def Main( self ) :
-        self._ParserSetup( )
+        self._parser = _ServerParser( self )
         self._Parse( )
         self._PostParse( )
         self._PreMain( )
@@ -739,6 +748,8 @@ class IbServerMain( object ) :
             os.chdir( self._defs.Lookup("Tmp") )
 
         self._dags.Evaluate( )
+        if self._args.verbose :
+            self._dags.Dump( verbose=self._args.verbose - 1 )
         self._dags.Execute( verbose=self._args.verbose )
 
 class IbModule_server_main( object ) :

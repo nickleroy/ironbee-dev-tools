@@ -20,7 +20,7 @@ from ib.util.dag import *
 class IbServerDags( object ) :
     def __init__( self, main ) :
         self._dags = { main.Name : main }
-        self._main = main
+        self._maindag = main
 
     def _CreateDag( self, name, parent, *args, **kwargs ) :
         dag = IbDag( name, parents=[parent], *args, **kwargs )
@@ -29,31 +29,31 @@ class IbServerDags( object ) :
 
     def _WipeDone( self, node ) :
         for dag in self._dags.values( ) :
-            if self._main in dag.Parents :
+            if self._maindag in dag.Parents :
                 dag.Enabled = (dag != node.Dag)
         return 0, None
 
     def _SetupWipe( self, after ) :
-        dag = self._CreateDag( 'Wipe', self._main, enabled=True, execute_after_dags=after )
+        dag = self._CreateDag( 'Wipe', self._maindag, enabled=True, execute_after_dags=after )
         self.PopulateWipeIronbee( self._CreateDag('WipeIronBee', dag) )
         self.PopulateWipeServer( self._CreateDag('WipeServer', dag) )
         wipe_node = IbDagNode( dag, 'WipeDone', recipe=self._WipeDone, always=True )
         return dag
 
     def _SetupPre( self, after ) :
-        dag = self._CreateDag( 'Pre', self._main, enabled=False, execute_after_dags=after )
+        dag = self._CreateDag( 'Pre', self._maindag, enabled=False, execute_after_dags=after )
         self.PopulatePreIronbee( self._CreateDag('PreIronBee', dag) )
         self.PopulatePreServer( self._CreateDag('PreServer', dag) )
         return dag
 
     def _SetupMain( self, after ) :
-        dag = self._CreateDag( 'Main', self._main, enabled=False, execute_after_dags=after )
+        dag = self._CreateDag( 'Main', self._maindag, enabled=False, execute_after_dags=after )
         self.PopulateMainIronbee( self._CreateDag('MainIronBee', dag) )
         self.PopulateMainServer( self._CreateDag('MainServer', dag) )
         return dag
 
     def _SetupPost( self, after ) :
-        dag = self._CreateDag( 'Post', self._main, enabled=False, execute_after_dags=after )
+        dag = self._CreateDag( 'Post', self._maindag, enabled=False, execute_after_dags=after )
         self.PopulatePostIronbee( self._CreateDag('PostIronBee', dag) )
         self.PopulatePostServer( self._CreateDag('PostServer', dag) )
         return dag
@@ -68,10 +68,17 @@ class IbServerDags( object ) :
         return self._dags.get(name)
 
     def Evaluate( self, *args, **kwargs ) :
-        self._main.Evaluate( *args, **kwargs )
+        self._maindag.Evaluate( *args, **kwargs )
 
     def Execute( self, *args, **kwargs ) :
-        self._main.Execute( *args, **kwargs )
+        self._maindag.Execute( *args, **kwargs )
+
+    def Dump( self, verbose=0 ) :
+        for name,dag in self._dags.items() :
+            print "DAG", name
+            if len(dag.Nodes) : print "Nodes:", [node.Name for node in dag.Nodes]
+            if len(dag.Targets) : print "Targets:", [target.Name for target in dag.Targets]
+
 
 
 class IbModule_server_dag( object ) :
