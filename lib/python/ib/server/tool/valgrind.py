@@ -36,6 +36,7 @@ IbServerToolValgrindTools = \
 {
     "valgrind" : IbServerToolValgrind("valgrind",
                                       args=("--leak-check=full",
+                                            "--num-callers=24",
                                             "--track-origins=yes",
                                             "--track-fds=yes",
                                             "--freelist-vol=200000000",
