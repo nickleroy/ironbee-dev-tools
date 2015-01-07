@@ -69,7 +69,7 @@ class IbBaseParser( object ) :
     def Parse( self ) :
         self._args = self._parser.parse_args()
         if not self._args.execute  and  self._args.verbose == 0  and  not self._args.quiet :
-            self._verbose = 1
+            self._args.verbose = 1
         return self._args
 
     Parser  = property( lambda self : self._parser )
