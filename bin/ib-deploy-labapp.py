@@ -31,11 +31,15 @@ class InvalidNetwork( BaseException ) : pass
 
 class Domain( object ) :
     _domain_re = re.compile( r'[\w]+\.[\w+]' )
-    def __init__( self, name ) :
-        if not self._domain_re.match( name ) :
+    def __init__( self, name, parent=None ) :
+        if parent is None  and  not self._domain_re.match( name ) :
             raise InvalidDomain( str(name) )
+        if parent is not None :
+            name = name+'.'+parent.Name
         self._name = name
+        self._parent = parent
     Name = property( lambda self : self._name )
+    Parent = property( lambda self : self._parent )
 
 
 class Network( object ) :
@@ -157,8 +161,8 @@ class Sensor( BaseHost ) :
 
 class DevLab( NamedHost ) :
     def __init__( self, name, clusterid, network, prefix,
-                  fqdn=None, viphost=None, port=8080, vipurl=None ) :
-        NamedHost.__init__( self, name, network=network, fqdn=fqdn )
+                  domain=None, fqdn=None, viphost=None, port=8080, vipurl=None ) :
+        NamedHost.__init__( self, name, domain=domain, network=network, fqdn=fqdn )
         self._clusterid = clusterid
         self._prefix = prefix
         if viphost is None :
@@ -166,7 +170,7 @@ class DevLab( NamedHost ) :
         self._viphost = viphost
         self._port = port
         if vipurl is None :
-            vipurl = 'http://{}.{}:{}/'.format(viphost, self.Domain.Name, port)
+            vipurl = 'http://{}:{}/'.format(viphost, port)
         self._vipurl = vipurl
         self._sensors = { }
 
@@ -279,7 +283,7 @@ class Main( object ) :
         self._labnames = {
             'dev01' : '9FCB72FB-FF78-498B-8E19-6ADC0180EC29',
             'dev02' : 'DD38B5F8-90A5-4858-9D7F-7C726AA13AD4',
-            'dev03' : '47C5ACA9-9ACA-49C2-976F-6F8FAD8E567A',
+            'dev03' : '38CC7D16-0980-47B7-A19F-1B210F242B5A',
             'qa'    : 'F9804CB8-BBA5-4089-B0AB-2E4B054746B4',
         }
 
@@ -303,7 +307,8 @@ class Main( object ) :
 
         self._labs = dict( )
         for name,clusterid in self._labnames.items() :
-            self._labs[name] = DevLab( name, clusterid, net129, self._args.prefix )
+            domain = Domain( name, parent=msn )
+            self._labs[name] = DevLab( name, clusterid, net129, self._args.prefix, domain=domain )
 
         self._labs['dev01'].AddSensor( 1, 113 )
         self._labs['dev03'].AddSensor( 1, 118 )
@@ -343,7 +348,10 @@ class Main( object ) :
                              self._args.passwd,
                              sensor,
                              self._appliances[self._args.which] )
-        if self._args.verbose :
+        if self._args.verbose >= 2 and not self._args.execute :
+            print 'Not executing command:'
+            print ' \\\n  '.join(cmd)
+        elif self._args.verbose :
             print "Executing:", cmd
         if self._args.execute :
             subprocess.call( cmd )
