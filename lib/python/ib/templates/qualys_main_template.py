@@ -19,71 +19,48 @@ import re
 import os
 import sys
 import subprocess
-import argparse
+from ib.util.parser import *
 
-class Main( object ) :
-    def __init__( self ) :
-        self._parser = argparse.ArgumentParser( description="Template",
-                                                prog="Template" )
 
-    def Setup( self ) :
-        self._parser.set_defaults( mode_xyzzy = True )
-        self._parser.set_defaults( mode_string = "xyzzy" )
-        class ModeAction(argparse.Action):
-            def __call__(self, parser, namespace, values, option_string=None):
-                print '%r %r %r' % (namespace, values, option_string)
-                if   values[0] in ( [ "x", "xyzzy" ] ) :
-                    namespace.mode_xyzzy = True
-                    namespace.mode_string = "xyzzy"
-                elif values[0] in ( [ "l", "lwpi" ] ) :
-                    namespace.mode_xyzzy = False
-                    namespace.mode_string = "lwpi"
-                else :
-                    namespace.error( "Invalid mode '"+values[0]+"'" )
-        self._parser.add_argument( "-m", "--mode",
-                           action=ModeAction, nargs=1,
-                           help="Specify mode of x)yzzy or l)wpi"+\
-                           " <default=xyzzy>" )
+class Parser( IbBaseParser ) :
+    def __init__( self, main ) :
+        IbBaseParser.__init__( self, "Perform {}".format(main.Description) )
 
-        self._parser.set_defaults( files = [] )
+        group = self.Parser.add_argument_group( )
+        group.add_argument( "sites", type=str, nargs='+', default=[],
+                            help="Specify site(s) to enable" )
+        group.add_argument( '--ib-options', '--ib',
+                            dest="ib_options", type=str, nargs='+', default=[],
+                            help="Specify IronBee option(s)" )
+        group.add_argument( '--srv-options',
+                            dest="srv_options", type=str, nargs='+', default=[],
+                            help="Specify server-specific option(s)" )
+
+        self.Parser.set_defaults( files = [] )
         class FilesAction(argparse.Action):
             def __call__(self, parser, namespace, values, option_string=None):
                 print '%r %r %r' % (namespace, values, option_string)
                 namespace.files += values
-        self._parser.add_argument( "-f", "--files",
-                                   action=FilesAction, nargs='+',
-                                   help="Specify list of files" )
+        self.Parser.add_argument( "-f", "--files",
+                                  action=FilesAction, nargs='+',
+                                  help="Specify list of files" )
 
-        self._parser.add_argument( "--execute",
-                                   action="store_true", dest="execute", default=True,
-                                   help="Enable execution <default>" )
-        self._parser.add_argument( "-n", "--no-execute",
-                                   action="store_false", dest="execute",
-                                   help="Disable execution (for test/debug)" )
-        self._parser.add_argument( "-V", "--verbose",
-                                   action="count", dest="verbose", default=0,
-                                   help="Increment verbosity level" )
-        self._parser.add_argument( "-q", "--quiet",
-                                   action="store_true", dest="quiet", default=False,
-                                   help="be vewwy quiet (I'm hunting wabbits)" )
+class Main( object ) :
+    def __init__( self ) :
+        self._parser = Parser( self )
 
-        self._parser.add_argument('strings', metavar='S', type=str, nargs='*',
-                                  help='an string argument')
+    def _Setup( self ) :
+        pass
 
-    def Parse( self ) :
-        self._args = self._parser.parse_args()
+    def _Parse( self ) :
+        self._args = self.Parser.Parse()
         
     def Main( self ) :
-        self.Setup( )
-        self.Parse( )
-        print "Execute:"+str(self._args.execute), \
-            "Verbose:"+str(self._args.verbose), \
-            "Quiet:"+str(self._args.quiet), \
-            "xyzzy:"+str(self._args.mode_xyzzy), \
-            "Mode:"+str(self._args.mode_string), \
-            "Files:"+str(self._args.files)
-        if len(self._args.strings) :
-            print "Files (%d): %s\n" % ( len(self._args.strings), self._args.strings )
+        self._Setup( )
+        self._Parse( )
+
+    Description = property( lambda self : 'Template' )
+
 
 main = Main( )
 main.Main( )
