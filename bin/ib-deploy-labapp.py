@@ -153,8 +153,8 @@ class Host( BaseHost ) :
 
 
 class Sensor( BaseHost ) :
-    def __init__( self, name, lab, ip ) :
-        BaseHost.__init__( self, name, network=lab.Network, ip=ip )
+    def __init__( self, name, lab, ip, domain ) :
+        BaseHost.__init__( self, name, domain=domain, network=lab.Network, ip=ip )
         self._lab = lab
     Lab = property( lambda self : self._lab )
 
@@ -167,6 +167,10 @@ class DevLab( NamedHost ) :
         self._prefix = prefix
         if viphost is None :
             viphost = '{}.{}'.format('nsvip01', self.Domain.Name)
+        elif viphost.isdigit() :
+            viphost = 'nsvip{:02d}.{}'.format(int(viphost), self.Domain.Name)
+        elif viphost.count('.') == 0 :
+            viphost = '{}.{}'.format(viphost, self.DomainName)
         self._viphost = viphost
         self._port = port
         if vipurl is None :
@@ -181,7 +185,7 @@ class DevLab( NamedHost ) :
         assert ( name is None  and  num is not None ) or ( name is not None  and  num is None )
         if name is None :
             name = self._getName( num )
-        self._sensors[num] = Sensor( name, self, ip )
+        self._sensors[num] = Sensor( name, self, ip, self.Domain )
 
     def GetSensor( self, name=None, num=None ) :
         assert ( name is None  and  num is not None ) or ( name is not None  and  num is None )
@@ -262,12 +266,15 @@ class Parser( IbBaseParser ) :
         # No options for list
 
         p = subparsers.add_parser( 'add', help='Add a VMWare host' )
-        p.add_argument( "vmhost", help="VMWare host", nargs='?', choices=vmhosts )
-        p.add_argument( "lab", help="Development lab name", choices=labs )
-        p.add_argument( "appliance_num", type=int, help="Appliance number" )
-        p.add_argument( "which", choices=appliances,
-                        help="Specify which appliance" )
-        p.add_argument( "ip", nargs='?', help="IP Address of VM" )
+        p.add_argument( 'vmhost', help='VMWare host', nargs='?', choices=vmhosts )
+        p.add_argument( 'lab', help='Development lab name', choices=labs )
+        p.add_argument( 'appliance_num', type=int, help='Appliance number' )
+        p.add_argument( 'which', choices=appliances,
+                        help='Specify which appliance' )
+        p.add_argument( 'ip', nargs='?', help='IP Address of VM' )
+        p.add_argument( '--viphost',
+                        action='store', dest='viphost', default=None,
+                        help='Override VIP host' )
 
 
 class Main( object ) :
@@ -308,7 +315,10 @@ class Main( object ) :
         self._labs = dict( )
         for name,clusterid in self._labnames.items() :
             domain = Domain( name, parent=msn )
-            self._labs[name] = DevLab( name, clusterid, net129, self._args.prefix, domain=domain )
+            self._labs[name] = DevLab( name, clusterid, net129,
+                                       prefix=self._args.prefix,
+                                       domain=domain,
+                                       viphost=self._args.viphost )
 
         self._labs['dev01'].AddSensor( 1, 113 )
         self._labs['dev03'].AddSensor( 1, 118 )
@@ -352,7 +362,7 @@ class Main( object ) :
             print 'Not executing command:'
             print ' \\\n  '.join(cmd)
         elif self._args.verbose :
-            print "Executing:", cmd
+            print 'Executing:', cmd
         if self._args.execute :
             subprocess.call( cmd )
 
