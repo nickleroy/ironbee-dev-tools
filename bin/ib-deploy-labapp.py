@@ -235,17 +235,17 @@ class VMWareHost( NamedHost ) :
     VmNetwork = property( lambda self : self._vmnetwork )
     Datastore = property( lambda self : self._datastore )
 
-    def Upload( self, user, passwd, sensor, appliance_url, sslpass=None ) :
+    def Upload( self, user, passwd, sensor, appliance_url, sslpass=None, force=False ) :
         if sslpass is None :
             sslpass = 'GARBAGE'
         upload_url = 'vi://{}:{}@vcenter01.{}:443/WAF-MSN/host/{}/'. \
                      format(user, passwd, self.Domain.Name, self.FQDN )
         prop_suffix = 'Qualys_WAF_DailyBuild'
         lab = sensor.Lab
-        cmd = (
-            '/usr/bin/ovftool',
-            '--overwrite',
-            '--powerOffTarget',
+        cmd = [ '/usr/bin/ovftool' ]
+        if force :
+            cmd += [ '--overwrite', '--powerOffTarget', ]
+        cmd += [
             '--powerOn',
             '--name={}'.format(sensor.FQDN),
             '--network={}'.format(self.VmNetwork),
@@ -259,7 +259,7 @@ class VMWareHost( NamedHost ) :
             '--prop:vami.DNS.{}={}'.format(prop_suffix, lab.Network.NameServerIps),
             appliance_url,
             upload_url,
-        )
+        ]
         return cmd
 
 
@@ -276,6 +276,14 @@ class Parser( IbBaseParser ) :
         self.Parser.add_argument( '--prefix',
                                   action='store', dest='prefix', default=None,
                                   help='Specify prefix (default = user name)' )
+
+        self.Parser.set_defaults( force=False )
+        self.Parser.add_argument( '--force', '-f',
+                                  action='store_true', dest='force',
+                                  help='Force (default = False)' )
+        self.Parser.add_argument( '--no-force',
+                                  action='store_false', dest='force',
+                                  help='Disable force' )
 
         subparsers = self.Parser.add_subparsers(title='commands',
                                                 dest="command",
@@ -377,7 +385,8 @@ class Main( object ) :
         cmd = vmhost.Upload( self._args.user,
                              self._args.passwd,
                              sensor,
-                             self._appliances[self._args.which] )
+                             self._appliances[self._args.which],
+                             force=self._args.force )
         if self._args.verbose >= 2 and not self._args.execute :
             print 'Not executing command:'
             print ' \\\n  '.join(cmd)
