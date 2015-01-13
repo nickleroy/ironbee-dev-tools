@@ -277,13 +277,7 @@ class Parser( IbBaseParser ) :
                                   action='store', dest='prefix', default=None,
                                   help='Specify prefix (default = user name)' )
 
-        self.Parser.set_defaults( force=False )
-        self.Parser.add_argument( '--force', '-f',
-                                  action='store_true', dest='force',
-                                  help='Force (default = False)' )
-        self.Parser.add_argument( '--no-force',
-                                  action='store_false', dest='force',
-                                  help='Disable force' )
+        self.Parser.set_defaults( viphost=None, force=False )
 
         subparsers = self.Parser.add_subparsers(title='commands',
                                                 dest="command",
@@ -293,16 +287,17 @@ class Parser( IbBaseParser ) :
         p = subparsers.add_parser( 'list', help='list arguments' )
         # No options for list
 
-        p = subparsers.add_parser( 'add', help='Add a VMWare host' )
+        p = subparsers.add_parser( 'deploy', help='Deploy a sensor to VCenter' )
         p.add_argument( 'vmhost', help='VMWare host', nargs='?', choices=vmhosts )
         p.add_argument( 'lab', help='Development lab name', choices=labs )
         p.add_argument( 'appliance_num', type=int, help='Appliance number' )
-        p.add_argument( 'which', choices=appliances,
-                        help='Specify which appliance' )
+        p.add_argument( 'which', choices=appliances, help='Specify which appliance' )
         p.add_argument( 'ip', nargs='?', help='IP Address of VM' )
-        p.add_argument( '--viphost',
-                        action='store', dest='viphost', default=None,
-                        help='Override VIP host' )
+
+        p.add_argument( '--viphost', action='store', dest='viphost', help='Override VIP host' )
+
+        p.add_argument( '--force', '-f', action='store_true', dest='force', help='Force (default = False)' )
+        p.add_argument( '--no-force', action='store_false', dest='force', help='Disable force' )
 
 
 class Main( object ) :
@@ -376,8 +371,8 @@ class Main( object ) :
             for key,lab in self._labs.items() :
                 print '  {} sensors: {}'.format( key, ' '.join([s.Name for s in lab.Sensors]) )
             sys.exit( 0 )
-        if self._args.passwd is None :
-            self._args.passwd = getpass.getpass( 'Password for user {}: '.format(self._args.user) )
+        if self._args.passwd is None  and  self._args.execute :
+            self._args.passwd = getpass.getpass( 'Enter password for user {}: '.format(self._args.user) )
 
         lab = self._labs[self._args.lab]
         vmhost = self._esxihosts[self._args.vmhost]
