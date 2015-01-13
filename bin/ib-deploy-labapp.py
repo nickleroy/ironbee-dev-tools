@@ -20,6 +20,7 @@ import os
 import sys
 import subprocess
 import getpass
+import uuid
 from ib.util.parser import *
 
 
@@ -159,22 +160,39 @@ class Sensor( BaseHost ) :
     Lab = property( lambda self : self._lab )
 
 
+class DevLabInfo( object ) :
+    def __init__( self, name, clusterid, viphost=None ) :
+        assert type(name) == str
+        self._name = name
+        self._clusterid = uuid.UUID( clusterid )
+        assert viphost is None or type(viphost) in (int,str)
+        self._viphost = viphost
+    Name         = property( lambda self : self._name )
+    ClusterId    = property( lambda self : self._clusterid )
+    ClusterIdStr = property( lambda self : str(self._clusterid) )
+    VipHost      = property( lambda self : self._viphost )
+
+
 class DevLab( NamedHost ) :
-    def __init__( self, name, clusterid, network, prefix,
+    def __init__( self, labinfo, network, prefix,
                   domain=None, fqdn=None, viphost=None, port=8080, vipurl=None ) :
-        NamedHost.__init__( self, name, domain=domain, network=network, fqdn=fqdn )
-        self._clusterid = clusterid
+        NamedHost.__init__( self, labinfo.Name, domain=domain, network=network, fqdn=fqdn )
+        self._labinfo = labinfo
         self._prefix = prefix
         if viphost is None :
-            viphost = '{}.{}'.format('nsvip01', self.Domain.Name)
-        elif viphost.isdigit() :
-            viphost = 'nsvip{:02d}.{}'.format(int(viphost), self.Domain.Name)
+            viphost = labinfo.VipHost
+        if viphost is None :
+            nsvip = '{}.{}'.format('nsvip01', self.Domain.Name)
+        elif type(viphost) == int  or  viphost.isdigit() :
+            nsvip = 'nsvip{:02d}.{}'.format(int(viphost), self.Domain.Name)
         elif viphost.count('.') == 0 :
-            viphost = '{}.{}'.format(viphost, self.DomainName)
-        self._viphost = viphost
+            nsvip = '{}.{}'.format(viphost, self.DomainName)
+        else :
+            nsvip = viphost
+        self._viphost = nsvip
         self._port = port
         if vipurl is None :
-            vipurl = 'http://{}:{}/'.format(viphost, port)
+            vipurl = 'http://{}:{}/'.format(nsvip, port)
         self._vipurl = vipurl
         self._sensors = { }
 
@@ -193,13 +211,15 @@ class DevLab( NamedHost ) :
             name = self._getName( num )
         return self._sensors[name]
 
-    ClusterId  = property( lambda self : self._clusterid )
-    Network    = property( lambda self : self._network )
-    VipUrl     = property( lambda self : self._vipurl )
-    ServiceUrl = property( lambda self : self._vipurl )
-    UiHost     = property( lambda self : self._name )
-    Port       = property( lambda self : self._port )
-    Sensors    = property( lambda self : self._sensors.values() )
+    ClusterId    = property( lambda self : self._labinfo.ClusterId )
+    ClusterIdStr = property( lambda self : self._labinfo.ClusterIdStr )
+    LabInfo      = property( lambda self : self._labinfo )
+    Network      = property( lambda self : self._network )
+    VipUrl       = property( lambda self : self._vipurl )
+    ServiceUrl   = property( lambda self : self._vipurl )
+    UiHost       = property( lambda self : self._name )
+    Port         = property( lambda self : self._port )
+    Sensors      = property( lambda self : self._sensors.values() )
 
 
 class VMWareHost( NamedHost ) :
@@ -230,7 +250,7 @@ class VMWareHost( NamedHost ) :
             '--name={}'.format(sensor.FQDN),
             '--network={}'.format(self.VmNetwork),
             '--datastore={}'.format(self.Datastore),
-            '--prop:WAF_CLUSTER_ID={}'.format(lab.ClusterId),
+            '--prop:WAF_CLUSTER_ID={}'.format(lab.ClusterIdStr),
             '--prop:WAF_SERVICE_URL={}'.format(lab.ServiceUrl),
             '--prop:WAF_SSL_PASSPHRASE={}'.format(sslpass),
             '--prop:vami.ip0.{}={}'.format(prop_suffix, sensor.IpAddr),
@@ -287,17 +307,17 @@ class Main( object ) :
             br+'DevAppliance.13/exports/ova/Qualys-WAF-Dev-Appliance_OVF10.ova'
         }
         self._esxinames = ['esxi{:02d}'.format(n) for n in range(1, 10)] + ['waf-vm', 'bitter']
-        self._labnames = {
-            'dev01' : '9FCB72FB-FF78-498B-8E19-6ADC0180EC29',
-            'dev02' : 'DD38B5F8-90A5-4858-9D7F-7C726AA13AD4',
-            'dev03' : '38CC7D16-0980-47B7-A19F-1B210F242B5A',
-            'qa'    : 'F9804CB8-BBA5-4089-B0AB-2E4B054746B4',
-        }
+        self._labinfo = (
+            DevLabInfo( 'dev01', '9FCB72FB-FF78-498B-8E19-6ADC0180EC29' ),
+            DevLabInfo( 'dev02', 'DD38B5F8-90A5-4858-9D7F-7C726AA13AD4' ),
+            DevLabInfo( 'dev03', '38CC7D16-0980-47B7-A19F-1B210F242B5A', viphost=2 ),
+            DevLabInfo( 'qa',    'F9804CB8-BBA5-4089-B0AB-2E4B054746B4' ),
+        )
 
         self._parser = Parser( self,
                                self._appliances.keys(),
                                self._esxinames,
-                               self._labnames.keys() )
+                               [lab.Name for lab in self._labinfo] )
 
     def _Setup( self ) :
         msn = Domain( 'msn01.qualys.com' )
@@ -313,12 +333,12 @@ class Main( object ) :
         self._esxihosts = dict( [(name,VMWareHost(name, msn)) for name in self._esxinames] )
 
         self._labs = dict( )
-        for name,clusterid in self._labnames.items() :
-            domain = Domain( name, parent=msn )
-            self._labs[name] = DevLab( name, clusterid, net129,
-                                       prefix=self._args.prefix,
-                                       domain=domain,
-                                       viphost=self._args.viphost )
+        for labinfo in self._labinfo :
+            domain = Domain( labinfo.Name, parent=msn )
+            self._labs[labinfo.Name] = DevLab( labinfo, net129,
+                                               prefix=self._args.prefix,
+                                               domain=domain,
+                                               viphost=self._args.viphost )
 
         self._labs['dev01'].AddSensor( 1, 113 )
         self._labs['dev03'].AddSensor( 1, 118 )
