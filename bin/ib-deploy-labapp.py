@@ -222,6 +222,24 @@ class DevLab( NamedHost ) :
     Sensors      = property( lambda self : self._sensors.values() )
 
 
+class Appliance( object ) :
+    def __init__( self, name, ova=None, prop_suffix=None, url=None ) :
+        self._name = name
+        if ova is None :
+            ova = 'Qualys-WAF-{}-Appliance_OVF10.ova'.format( name )
+        self._ova = ova
+        if prop_suffix is None :
+            prop_suffix = 'Qualys_WAF_{}'.format( name )
+        self._prop_suffix = prop_suffix
+        if url is None :
+            url = 'http://10.112.129.114/build/' + name + 'Appliance.1/exports/ova/' + ova
+        self._url = url
+    Name       = property( lambda self : self._name )
+    Ova        = property( lambda self : self._ova )
+    Url        = property( lambda self : self._url )
+    PropSuffix = property( lambda self : self._prop_suffix )
+
+
 class VMWareHost( NamedHost ) :
     def __init__( self, name, domain=None, fqdn=None, vmnetwork=None, datastore=None ) :
         NamedHost.__init__( self, name, domain, fqdn )
@@ -235,12 +253,12 @@ class VMWareHost( NamedHost ) :
     VmNetwork = property( lambda self : self._vmnetwork )
     Datastore = property( lambda self : self._datastore )
 
-    def Upload( self, user, passwd, sensor, appliance_url, sslpass=None, force=False ) :
+    def Upload( self, user, passwd, sensor, appliance, sslpass=None, force=False ) :
+        assert isinstance(appliance, Appliance)
         if sslpass is None :
             sslpass = 'GARBAGE'
         upload_url = 'vi://{}:{}@vcenter01.{}:443/WAF-MSN/host/{}/'. \
                      format(user, passwd, self.Domain.Name, self.FQDN )
-        prop_suffix = 'Qualys_WAF_DailyBuild'
         lab = sensor.Lab
         cmd = [ '/usr/bin/ovftool' ]
         if force :
@@ -253,11 +271,11 @@ class VMWareHost( NamedHost ) :
             '--prop:WAF_CLUSTER_ID={}'.format(lab.ClusterIdStr),
             '--prop:WAF_SERVICE_URL={}'.format(lab.ServiceUrl),
             '--prop:WAF_SSL_PASSPHRASE={}'.format(sslpass),
-            '--prop:vami.ip0.{}={}'.format(prop_suffix, sensor.IpAddr),
-            '--prop:vami.gateway.{}={}'.format(prop_suffix, lab.Network.Gateway),
-            '--prop:vami.netmask0.{}={}'.format(prop_suffix, lab.Network.NetMask),
-            '--prop:vami.DNS.{}={}'.format(prop_suffix, lab.Network.NameServerIps),
-            appliance_url,
+            '--prop:vami.ip0.{}={}'.format(appliance.PropSuffix, sensor.IpAddr),
+            '--prop:vami.gateway.{}={}'.format(appliance.PropSuffix, lab.Network.Gateway),
+            '--prop:vami.netmask0.{}={}'.format(appliance.PropSuffix, lab.Network.NetMask),
+            '--prop:vami.DNS.{}={}'.format(appliance.PropSuffix, lab.Network.NameServerIps),
+            appliance.Url,
             upload_url,
         ]
         return cmd
@@ -302,14 +320,10 @@ class Parser( IbBaseParser ) :
 
 class Main( object ) :
     def __init__( self ) :
-        br = 'http://10.112.129.114/build/'
         self._appliances = {
-            'daily' :
-            br+'DailyBuildAppliance.1/exports/ova/Qualys-WAF-DailyBuild-Appliance_OVF10.ova',
-            'dev' :
-            br+'DevAppliance.1/exports/ova/Qualys-WAF-Dev-Appliance_OVF10.ova',
-            'prod' :
-            br+'ProdAppliance.1/exports/ova/QualysGuard-WAF_OVF10.ova',
+            'daily' : Appliance( 'DailyBuild' ),
+            'dev'   : Appliance( 'Dev' ),
+            'prod'  : Appliance( 'Prod', 'QualysGuard-WAF_OVF10.ova' ),
         }
         self._esxinames = ['esxi{:02d}'.format(n) for n in range(1, 10)] + ['waf-vm', 'bitter']
         self._labinfo = (
