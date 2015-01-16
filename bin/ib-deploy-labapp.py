@@ -307,7 +307,9 @@ class Main( object ) :
             'daily' :
             br+'DailyBuildAppliance.1/exports/ova/Qualys-WAF-DailyBuild-Appliance_OVF10.ova',
             'dev' :
-            br+'DevAppliance.13/exports/ova/Qualys-WAF-Dev-Appliance_OVF10.ova'
+            br+'DevAppliance.13/exports/ova/Qualys-WAF-Dev-Appliance_OVF10.ova',
+            'prod' :
+            br+'ProdAppliance.1/exports/ova/QualysGuard-WAF_OVF10.ova',
         }
         self._esxinames = ['esxi{:02d}'.format(n) for n in range(1, 10)] + ['waf-vm', 'bitter']
         self._labinfo = (
