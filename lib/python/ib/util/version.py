@@ -19,8 +19,6 @@ import re
 import os
 import sys
 import string
-import magic
-import subprocess
 
 class IbVersionException( BaseException ) : pass
 class IbInvalidVersion( IbVersionException ) : pass
@@ -336,74 +334,6 @@ class IbVersionCmp( IbVersionComparer ) :
         elif type(verinfo) is IbVersionCmp :
             return self.CompareVersions( self.Version, verinfo.Version )
 
-
-class IbVersionReader( object ) :
-    def __init__( self ) :
-        self._magic = magic.open(magic.NONE)
-        self._magic.load( )
-
-    def GetAutoVersion( self, path ) :
-        ftype = self._magic.file( os.path.realpath(path) )
-        self._last_path = path
-        if 'ASCII' in ftype  or  'text' in ftype :
-            return self.GetTextVersion( path )
-        else :
-            return self.GetBinVersion( path )
-
-    _printable = frozenset(string.printable)
-    def GetStrings( self, fp ) :
-        found_str = ""
-        while True:
-            data = fp.read(1024*4)
-            if not data:
-                break
-            for char in data:
-                if char in self._printable:
-                    found_str += char
-                elif len(found_str) >= 4:
-                    yield found_str
-                    found_str = ""
-                else:
-                    found_str = ""
-
-    _bin_re = re.compile( r"IronBee/([\d\.]+)" )
-    def GetBinVersion( self, path ) :
-        try :
-            fp = open(path, "rb")
-            for line in self.GetStrings( fp ) :
-                m = self._bin_re.match( line )
-                if m is None :
-                    continue
-                version = IbVersion.CreateFromStr( m.group(1) )
-                if version is not None :
-                    version.Path = path
-                    return version
-            return None
-        except IOError as e :
-            return None
-
-    def GetTextVersion( self, path ) :
-        regex = re.compile( 'VERSION=([\d\.]+)' )
-        for line in open(path) :
-            m = regex.search(line)
-            if m is None :
-                continue
-            version = IbVersion.CreateFromStr( m.group(1) )
-            if version is not None :
-                version.Path = path
-                return version
-        return None
-
-    @staticmethod
-    def FindFile( path ) :
-        if os.path.isfile( path ) :
-            return path
-        for name in ('libironbee.a', 'libironbee.so') :
-            full = os.path.join(path, name)
-            if os.path.isfile( full ) :
-                return full
-        return None
-
 IbVersion._InitClass( )
 _IbVersionOpTable._InitClass( )
 
@@ -466,9 +396,6 @@ if __name__ == "__main__" :
 
 class IbModule_util_version( object ) :
     modulePath = __file__
-
-if __name__ == "__main__" :
-    assert False, "not stand-alone"
 
 ### Local Variables: ***
 ### py-indent-offset:4 ***

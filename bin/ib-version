@@ -18,7 +18,8 @@
 import os
 import sys
 import argparse
-from   ib.util.version import *
+from ib.util.version import *
+from ib.util.version_reader import *
 
 class Main( object ) :
     def __init__( self ) :

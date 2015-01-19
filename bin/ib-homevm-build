@@ -28,11 +28,12 @@ import tarfile
 import git
 import functools
 
-from ib.util.version  import *
+from ib.util.version import *
+from ib.util.version_reader import *
 from ib.homevm.exceptions import *
-from ib.homevm.build      import *
-from ib.homevm.config     import *
-from ib.homevm.parser     import *
+from ib.homevm.build import *
+from ib.homevm.config import *
+from ib.homevm.parser import *
 
 class DetectionError(BaseException) : pass
 

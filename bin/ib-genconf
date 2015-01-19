@@ -29,6 +29,7 @@ import copy
 from ib.util.dict import *
 from ib.util.expander import *
 from ib.util.version import *
+from ib.util.version_reader import *
 
 class ProcessError( BaseException ) : pass
 

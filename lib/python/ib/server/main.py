@@ -29,11 +29,12 @@ from functools import partial
 import imp
 import resource
 
-from ib.util.dict     import *
-from ib.util.expander import *
-from ib.util.version  import *
-from ib.util.parser   import *
-from ib.util.dag      import *
+from ib.util.dict           import *
+from ib.util.expander       import *
+from ib.util.version        import *
+from ib.util.version_reader import *
+from ib.util.parser         import *
+from ib.util.dag            import *
 
 import ib.server.tool.base
 import ib.server.tool.gdb
