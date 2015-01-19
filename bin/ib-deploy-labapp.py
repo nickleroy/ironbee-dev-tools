@@ -18,10 +18,13 @@
 import re
 import os
 import sys
+import argparse
 import subprocess
 import getpass
 import uuid
+
 from ib.util.parser import *
+from ib.util.version import *
 
 
 class InvalidIp( BaseException ) : pass
@@ -223,18 +226,33 @@ class DevLab( NamedHost ) :
 
 
 class Appliance( object ) :
-    def __init__( self, name, ova=None, prop_suffix=None, url=None ) :
+    def __init__( self, name, rev, ova=None, prop_suffix=None, url=None ) :
+        assert isinstance(rev, IbVersion)
+        assert IbVersion('0.9') <= rev <= IbVersion('1.2')
+        print ova
+
         self._name = name
+        self._rev = rev
         if ova is None :
-            ova = 'Qualys-WAF-{}-Appliance_OVF10.ova'.format( name )
+            if rev >= IbVersion('1.1') :
+                ova = 'Qualys-WAF-{}-Appliance_OVF10.ova'.format( name )
+            else :
+                ova = 'QualysGuard-WAF_OVF10.ova'
         self._ova = ova
         if prop_suffix is None :
-            prop_suffix = 'Qualys_WAF_{}'.format( name )
+            if rev >= IbVersion('1.1') :
+                prop_suffix = 'Qualys_WAF_{}'.format( name )
+            else :
+                prop_suffix = 'Qualys_WAF'
         self._prop_suffix = prop_suffix
         if url is None :
-            url = 'http://10.112.129.114/build/' + name + 'Appliance.1/exports/ova/' + ova
+            if type(ova) == file :
+                url = 'file://'+ova.name
+            else :
+                url = 'http://10.112.129.114/build/{}Appliance.1/exports/ova/{}'.format(name, ova)
         self._url = url
     Name       = property( lambda self : self._name )
+    Rev        = property( lambda self : self._rev )
     Ova        = property( lambda self : self._ova )
     Url        = property( lambda self : self._url )
     PropSuffix = property( lambda self : self._prop_suffix )
@@ -260,6 +278,12 @@ class VMWareHost( NamedHost ) :
         upload_url = 'vi://{}:{}@vcenter01.{}:443/WAF-MSN/host/{}/'. \
                      format(user, passwd, self.Domain.Name, self.FQDN )
         lab = sensor.Lab
+        if appliance.Rev >= IbVersion('1.1') :
+            prop_ID = 'WAF_CLUSTER_ID'
+            prop_URL = 'WAF_SERVICE_URL'
+        else :
+            prop_ID = 'RNS_TOKEN'
+            prop_URL = 'RNS_URL'
         cmd = [ '/usr/bin/ovftool' ]
         if force :
             cmd += [ '--overwrite', '--powerOffTarget', ]
@@ -268,8 +292,8 @@ class VMWareHost( NamedHost ) :
             '--name={}'.format(sensor.FQDN),
             '--network={}'.format(self.VmNetwork),
             '--datastore={}'.format(self.Datastore),
-            '--prop:WAF_CLUSTER_ID={}'.format(lab.ClusterIdStr),
-            '--prop:WAF_SERVICE_URL={}'.format(lab.ServiceUrl),
+            '--prop:{}={}'.format(prop_ID, lab.ClusterIdStr),
+            '--prop:{}={}'.format(prop_URL, lab.ServiceUrl),
             '--prop:WAF_SSL_PASSPHRASE={}'.format(sslpass),
             '--prop:vami.ip0.{}={}'.format(appliance.PropSuffix, sensor.IpAddr),
             '--prop:vami.gateway.{}={}'.format(appliance.PropSuffix, lab.Network.Gateway),
@@ -294,6 +318,18 @@ class Parser( IbBaseParser ) :
         self.Parser.add_argument( '--prefix',
                                   action='store', dest='prefix', default=None,
                                   help='Specify prefix (default = user name)' )
+        self.Parser.add_argument( '--rev',
+                                  action='store', dest='appliance_rev', default=None,
+                                  help='Specify appliance revision (default = <appliance specific>)' )
+        self.Parser.add_argument( '--appliance-url',
+                                  action='store', dest='appliance_url', default=None,
+                                  help='Specify appliance url (default = <appliance specific>)' )
+        self.Parser.add_argument( '--vsphere-rev',
+                                  action='store', dest='vsphere_rev', default='5.1',
+                                  help='Specify vSphere version (default = 5.1' )
+        self.Parser.add_argument( '--ova-file',
+                                  action='store', dest='ovafile', type=argparse.FileType('r'), default=None,
+                                  help='Specify appliance OVA file' )
 
         self.Parser.set_defaults( viphost=None, force=False )
 
@@ -320,12 +356,35 @@ class Parser( IbBaseParser ) :
 
 class Main( object ) :
     def __init__( self ) :
-        self._appliances = {
-            'daily' : Appliance( 'DailyBuild' ),
-            'dev'   : Appliance( 'Dev' ),
-            'prod'  : Appliance( 'Prod', 'QualysGuard-WAF_OVF10.ova' ),
-        }
         self._esxinames = ['esxi{:02d}'.format(n) for n in range(1, 10)] + ['waf-vm', 'bitter']
+        self._parser = Parser( self,
+                               ('daily', 'dev', 'prod'),
+                               self._esxinames,
+                               ('dev01', 'dev02', 'dev03', 'qa') )
+
+    def _Parse( self ) :
+        self._args = self._parser.Parse()
+        if self._args.user is None :
+            self._args.user = getpass.getuser( )
+        if self._args.prefix is None :
+            self._args.prefix = self._args.user
+
+    Description = property( lambda self : 'Deploy appliance' )
+
+    def _PostParse( self ) :
+        if not self._args.execute :
+            return
+
+        if self._args.passwd is None :
+            self._args.passwd = getpass.getpass( 'Enter password for user {}: '.format(self._args.user) )
+
+
+    def _Setup( self ) :
+        self._appliances = {
+            'daily' : Appliance( 'DailyBuild', rev=IbVersion('1.1'), ova=self._args.ovafile ),
+            'dev'   : Appliance( 'Dev', rev=IbVersion('1.0'), ova=self._args.ovafile ),
+            'prod'  : Appliance( 'Prod', rev=IbVersion('1.0'), ova=self._args.ovafile ),
+        }
         self._labinfo = (
             DevLabInfo( 'dev01', '9FCB72FB-FF78-498B-8E19-6ADC0180EC29' ),
             DevLabInfo( 'dev02', 'DD38B5F8-90A5-4858-9D7F-7C726AA13AD4' ),
@@ -333,12 +392,6 @@ class Main( object ) :
             DevLabInfo( 'qa',    'F9804CB8-BBA5-4089-B0AB-2E4B054746B4' ),
         )
 
-        self._parser = Parser( self,
-                               self._appliances.keys(),
-                               self._esxinames,
-                               [lab.Name for lab in self._labinfo] )
-
-    def _Setup( self ) :
         msn = Domain( 'msn01.qualys.com' )
         net128 = Network( msn, '10.112.128' )
         net129 = Network( msn, '10.112.129' )
@@ -367,18 +420,9 @@ class Main( object ) :
         self._labs['qa'].AddSensor( 1, 161 )
         self._labs['qa'].AddSensor( 1, 162 )
 
-
-    def _Parse( self ) :
-        self._args = self._parser.Parse()
-        if self._args.user is None :
-            self._args.user = getpass.getuser( )
-        if self._args.prefix is None :
-            self._args.prefix = self._args.user
-
-    Description = property( lambda self : 'Deploy appliance' )
-
     def Main( self ) :
         self._Parse( )
+        self._PostParse( )
         self._Setup( )
         if self._args.command == 'list' :
             print 'ESXI Hosts:', ' '.join( [host.Name for host in self._esxihosts.values()] )
@@ -387,8 +431,6 @@ class Main( object ) :
             for key,lab in self._labs.items() :
                 print '  {} sensors: {}'.format( key, ' '.join([s.Name for s in lab.Sensors]) )
             sys.exit( 0 )
-        if self._args.passwd is None  and  self._args.execute :
-            self._args.passwd = getpass.getpass( 'Enter password for user {}: '.format(self._args.user) )
 
         lab = self._labs[self._args.lab]
         vmhost = self._esxihosts[self._args.vmhost]
