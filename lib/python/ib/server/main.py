@@ -341,6 +341,7 @@ class IbServerMain( object ) :
         "IbConfigFile"     : "${ServerNameShort}.conf",
         "IbConfig"         : "${IbEtc}/${IbConfigFile}",
         "IbVersion"        : None,
+        "TxLogDir"         : "${IbLogDir}/txlogs",
         "RnsEtc"           : "${Etc}/rns-ironbee",
         "RnsEtcIn"         : "${EtcIn}/rns-ironbee",
         "RnsGenerator"     : "${EtcIn}/rns-ironbee/rns_generator.py",
@@ -480,7 +481,7 @@ class IbServerMain( object ) :
         return 0, None
 
     def CreateVarDirs( self, node ) :
-        for name in ( 'LogDir', 'IbLogDir', 'ServerLogDir', 'VarRun' ) :
+        for name in ( 'LogDir', 'IbLogDir', 'TxLogDir', 'ServerLogDir', 'VarRun' ) :
             logdir = self._defs.Lookup( name )
             if logdir is not None  and  not os.path.isdir( logdir ) :
                 os.makedirs( logdir )

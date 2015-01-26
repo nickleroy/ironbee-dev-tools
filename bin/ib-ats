@@ -33,6 +33,7 @@ class Main( IbServerMain ) :
         "AtsVar"          : "${AtsRoot}/var",
         "AtsLogDir"       : "${AtsVar}/log/trafficserver",
         "ServerLogDir"    : "${AtsLogDir}",
+        "TxLogDir"        : "${AtsLogDir}/txlogs",
         "AtsEtcInRoot"    : "${EtcIn}/trafficserver",
         "AtsEtcIn"        : "${AtsEtcInRoot}/working/${AtsVersion}",
         "AtsEtc"          : "${Etc}/trafficserver",
