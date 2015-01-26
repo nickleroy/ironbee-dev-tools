@@ -229,7 +229,6 @@ class Appliance( object ) :
     def __init__( self, name, rev, ova=None, prop_suffix=None, url=None ) :
         assert isinstance(rev, IbVersion)
         assert IbVersion('0.9') <= rev <= IbVersion('1.2')
-        print ova
 
         self._name = name
         self._rev = rev
@@ -358,7 +357,7 @@ class Main( object ) :
     def __init__( self ) :
         self._esxinames = ['esxi{:02d}'.format(n) for n in range(1, 10)] + ['waf-vm', 'bitter']
         self._parser = Parser( self,
-                               ('daily', 'dev', 'prod'),
+                               ('daily', 'dev', 'next', 'prod'),
                                self._esxinames,
                                ('dev01', 'dev02', 'dev03', 'qa') )
 
@@ -382,6 +381,7 @@ class Main( object ) :
     def _Setup( self ) :
         self._appliances = {
             'daily' : Appliance( 'DailyBuild', rev=IbVersion('1.1'), ova=self._args.ovafile ),
+            'next'  : Appliance( 'NextRelease', rev=IbVersion('1.1'), ova=self._args.ovafile ),
             'dev'   : Appliance( 'Dev', rev=IbVersion('1.0'), ova=self._args.ovafile ),
             'prod'  : Appliance( 'Prod', rev=IbVersion('1.0'), ova=self._args.ovafile ),
         }
