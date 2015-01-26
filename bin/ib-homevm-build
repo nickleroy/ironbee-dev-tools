@@ -248,6 +248,7 @@ class _Main( object ) :
         ignore_ats = self._ts_name.replace('.', '\.')
         ignore_rules = (
             # ignore?, pattern ..  First match wins
+            (True,  re.compile(r'.*\.sock')),
             (True,  re.compile(r'tmp/.*')),
             (True,  re.compile(r'opt/'+ignore_ats+'/(etc|var|tmp)/*')),
             (False, re.compile(r'opt/'+ignore_ats+'/(bin|include|lib|share)')),
@@ -276,6 +277,7 @@ class _Main( object ) :
                              ignore=functools.partial(self._CopyIgnore, ignore_rules) )
             dirs = (
                 ('var', 'run'),
+                ('var', 'log', 'trafficserver'),
                 ('var', 'log', 'trafficserver'),
                 ('var', 'trafficserver', 'log'),
                 ('tmp',),
