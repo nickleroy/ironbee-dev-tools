@@ -1,0 +1,266 @@
+#! /usr/bin/env python
+# ****************************************************************************
+# Licensed to Qualys, Inc. (QUALYS) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# QUALYS licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ****************************************************************************
+import re
+import os
+import sys
+import time
+import signal
+import subprocess
+import argparse
+from ib.util.parser import *
+
+
+class Parser( IbBaseParser ) :
+    def __init__( self, main ) :
+        IbBaseParser.__init__( self, "Perform {}".format(main.Description) )
+
+        self.Parser.add_argument( '--curls', '-c',
+                                  dest='curls', type=int, default=1,
+                                  help='# of simultaneous curls' )
+
+        class TimeoutAction(IbBaseParser.TimeAction):
+            def SetValue( self, parser, namespace, option_string, value ) :
+                namespace.timeout  = value
+        self.Parser.add_argument( '--timeout', '-t',
+                                  dest='timeout', action=TimeoutAction, default=60.0,
+                                  help='Timeout in seconds (default=60s)' )
+
+        class MaxTimeAction(IbBaseParser.TimeAction):
+            def SetValue( self, parser, namespace, option_string, value ) :
+                namespace.maxtime  = value
+        self.Parser.add_argument( '--max-time',
+                                  dest='maxtime', action=MaxTimeAction, default=None,
+                                  help='Max run time (default=None)' )
+
+        class TimeIntervalAction(IbBaseParser.TimeAction):
+            def SetValue( self, parser, namespace, option_string, value ) :
+                namespace.interval  = value
+        self.Parser.add_argument( '--interval', '-d',
+                                  dest='interval', action=TimeIntervalAction, default=0.0,
+                                  help='Minimum time between loop starts' )
+
+        self.Parser.set_defaults( loops=1 )
+        self.Parser.add_argument( '--loops', '-l', dest='loops', type=int, help='# of loops' )
+        self.Parser.add_argument( '--infinite', '-i',
+                                  dest='loops', action='store_const', const=None,
+                                  help='Infinite # of loops' )
+
+        self.Parser.set_defaults( shutdown=False )
+        self.Parser.add_argument( '--shutdown', '-s',
+                                  dest='shutdown', action="store_true",
+                                  help='Attempt to shut down IronBee when done' )
+        self.Parser.add_argument( '--no-shutdown', '-S',
+                                  dest='shutdown', action="store_false",
+                                  help='Don\'t shut down IronBee when done' )
+
+        url  = os.environ.get( 'IB_ATS_URL', 'http://{}:8185/'.format(os.environ['IF_NET_FQDN']) )
+        self.Parser.add_argument( 'url', default=url, nargs='?', help='URL to curl' )
+
+        self.Parser.add_argument( '--ibctl',
+                                  dest='ibctl', type=argparse.FileType('r'), default=None,
+                                  help='Path to ibctl (default=auto)' )
+
+        etc = os.environ.get('IB_ETC', '/local/qualys/etc/ironbee')
+        self.Parser.add_argument( '--etc',
+                                  dest='etc', default=etc,
+                                  help='Path to IronBee configuration (default={})'.format(etc) )
+
+        self.Parser.add_argument( '--config',
+                                  dest='config', type=argparse.FileType('r'), default=None,
+                                  help='Path to IronBee configuration (default=$IB_ETC/ts.conf)' )
+
+
+class Proc( object ) :
+    def __init__( self, name, proc ) :
+        self._name = name
+        self._proc = proc
+        self._long = '{} ({})'.format(self._name, self._proc.pid)
+    Name = property( lambda self : self._name )
+    PID  = property( lambda self : self._proc.pid )
+    Proc = property( lambda self : self._proc )
+    Long = property( lambda self : self._long )
+
+
+class Main( object ) :
+    def __init__( self ) :
+        self._parser = Parser( self )
+        self._started = time.time()
+        self._loop_started = None
+
+    def _Setup( self ) :
+        pass
+
+    def _Parse( self ) :
+        self._args = self._parser.Parse()
+        if self._args.loops is 1  and  self._args.maxtime is not None :
+            self._args.loops = None
+
+    def _IbControl( self, command, args=None ) :
+        cmd = [ 'ibctl' ] if self._args.ibctl is None  else  [ self._args.ibctl.name ]
+        cmd += [ command ]
+        name = 'ibctl-'+command
+        if args is not None :
+            cmd += args
+        if self._args.verbose :
+            print 'Executing "{}"'.format(cmd)
+        if self._args.execute :
+            proc = subprocess.Popen( cmd )
+            assert proc.pid not in self._pids
+            self._pids[proc.pid] = Proc( name, proc )
+            if self._args.verbose :
+                print '{} pid={}'.format(name, proc.pid)
+
+    def _StartReconfig( self ) :
+        config = os.path.join(self._args.etc, 'ts.conf') if self._args.config is None else self._args.config.name
+        self._IbControl( 'engine_create', [ config ] )
+
+    def _Disable( self ) :
+        self._IbControl( 'disable' )
+
+    def _Cleanup( self ) :
+        self._IbControl( 'cleanup' )
+
+    def _StartCurl( self, n=0 ) :
+        name = 'curl #{}'.format(n+1)
+        cmd = [ '/usr/bin/curl', '-q', '-o', '/dev/null', '-s', self._args.url ]
+        if self._args.verbose :
+            print 'Executing {} "{}"'.format(name, cmd)
+        if self._args.execute :
+            proc = subprocess.Popen( cmd )
+            assert proc.pid not in self._pids
+            self._pids[proc.pid] = Proc( name, proc )
+            if self._args.verbose :
+                print '{}: pid={}'.format(name, proc.pid)
+
+    def Elapsed( self, loop=True ) :
+        if not loop :
+            return time.time() - self._started
+        elif self._loop_started is None :
+            return 0.0
+        else :
+            return time.time() - self._loop_started
+
+    def _Reaper(self, signum, frame) :
+        while True :
+            try :
+                pid, status = os.waitpid( 0, os.WNOHANG )
+                if pid == 0 :
+                    return
+            except OSError :
+                return
+            proc = self._pids.get(pid)
+            if proc is None :
+                print "Unknown child", pid, "exited with status", status
+                return
+            del self._pids[ pid ]
+            print 'Child {} "{}" exited with status {} @ {:.2f}' \
+                .format(pid, proc.Name, status, self.Elapsed())
+
+    def _KillChildren( self ) :
+        for pid,proc in self._pids.items() :
+            print 'Killing proc "{}" {} @ {:.2f}'.format(proc.Name, pid, self.Elapsed())
+            proc.Proc.kill()
+
+    def _HandleSignal( self, signum, frame ) :
+        print 'Caught signal {}.  Initiating shutdown.'.format(signum)
+        self._KillChildren( )
+        if signum not in (signal.SIGCHLD, signal.SIGALRM) :
+            self._args.loops = -1
+            self._shutdown = True
+
+    def _Setup( self ) :
+        signal.signal(signal.SIGALRM, self._HandleSignal)
+        signal.signal(signal.SIGTERM, self._HandleSignal)
+        signal.signal(signal.SIGQUIT, self._HandleSignal)
+        signal.signal(signal.SIGINT,  self._HandleSignal)
+        signal.signal(signal.SIGCHLD, self._Reaper)
+        self._shutdown = False
+
+    def _Start( self, loop ) :
+        self._StartReconfig( )
+        for curl in range(self._args.curls) :
+            self._StartCurl( curl )
+
+    def _Wait( self, loop ) :
+        signal.alarm( int(self._args.timeout) )
+        last = -1
+        while len(self._pids) :
+            time.sleep( 0.1 )
+            elapsed = self.Elapsed()
+
+            npids = len(self._pids)
+            changed = last != npids
+            last = npids
+
+            if not changed  and  not self._args.quiet :
+                names = [p.Name for p in self._pids.values()]
+                sys.stdout.write( '\r#{} {:.2f}s n:{} {}\r'.format(loop, elapsed, npids, names) )
+                sys.stdout.flush()
+            elif self._args.verbose > 1 :
+                print '#{} {:.2f} Waiting for {} children to finish:'.format(loop, elapsed, npids)
+                for pid,proc in self._pids.items() :
+                    print '  {}'.format(proc.Long)
+            elif self._args.verbose :
+                print '#{} {:.2f} Waiting for to finish: {}'.format(loop, elapsed, self._pids.keys())
+
+    def _Loop( self, loop ) :
+        self._loop_started = time.time()
+        self._pids = dict()
+        if not self._args.quiet :
+            print 'Loop #{} Starting @ {:.2f}s'.format(loop, self.Elapsed(False))
+        self._Start( loop )
+        self._Wait( loop )
+        if not self._args.quiet :
+            print 'Loop #{} Finished {:.2f}s @ {:.2f}s'.format(loop, self.Elapsed(), self.Elapsed(False))
+
+    def _RunLoops( self ) :
+        loop = 1
+        end_time = None if self._args.maxtime is None  else  time.time() + self._args.maxtime
+
+        while (self._args.loops is None  or  loop <= self._args.loops) and \
+              (end_time is None  or  time.time() < end_time) :
+            next_loop = time.time() + self._args.interval
+            self._Loop( loop )
+            while not self._shutdown  and  time.time() < next_loop :
+                time.sleep(0.1)
+            loop += 1
+        print 'Exiting: # loops is {}, total elapsed time is {:.2f}s'.format(loop, self.Elapsed(False))
+
+    def Main( self ) :
+        self._Setup( )
+        self._Parse( )
+        self._Setup( )
+        self._RunLoops( )
+        if self._args.shutdown :
+            self._Disable( )
+            self._Wait( -1 )
+            self._Cleanup( )
+            self._Wait( -1 )
+
+    Description = property( lambda self : 'Template' )
+
+
+main = Main( )
+main.Main( )
+
+### Local Variables: ***
+### py-indent-offset:4 ***
+### python-indent:4 ***
+### python-continuation-offset:4 ***
+### tab-width:4  ***
+### End: ***
