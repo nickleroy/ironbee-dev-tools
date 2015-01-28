@@ -164,26 +164,37 @@ class Sensor( BaseHost ) :
 
 
 class DevLabInfo( object ) :
-    def __init__( self, name, clusterid, viphost=None ) :
+    def __init__( self, name, clusterid, sensors=None, viphost=None ) :
         assert type(name) == str
+        assert sensors is None  or type(sensors) == dict
         self._name = name
         self._clusterid = uuid.UUID( clusterid )
         assert viphost is None or type(viphost) in (int,str)
         self._viphost = viphost
+        self._sensors = {} if sensors is None else sensors
+
+    def _getSensors( self ) :
+        for num,ip in self._sensors.items() :
+            yield num,ip
+
     Name         = property( lambda self : self._name )
     ClusterId    = property( lambda self : self._clusterid )
     ClusterIdStr = property( lambda self : str(self._clusterid) )
     VipHost      = property( lambda self : self._viphost )
-
+    Sensors      = property( _getSensors )
 
 class DevLab( NamedHost ) :
-    def __init__( self, labinfo, network, prefix,
+    def __init__( self, labinfo, network, prefix=None,
                   domain=None, fqdn=None, viphost=None, port=8080, vipurl=None ) :
         NamedHost.__init__( self, labinfo.Name, domain=domain, network=network, fqdn=fqdn )
         self._labinfo = labinfo
-        self._prefix = prefix
+        self.Prefix = prefix
+        self.SetVip( viphost, port, vipurl )
+        self._sensors = { }
+
+    def SetVip( self, viphost=None, port=8080, vipurl=None ) :
         if viphost is None :
-            viphost = labinfo.VipHost
+            viphost = self.LabInfo.VipHost
         if viphost is None :
             nsvip = '{}.{}'.format('nsvip01', self.Domain.Name)
         elif type(viphost) == int  or  viphost.isdigit() :
@@ -197,26 +208,38 @@ class DevLab( NamedHost ) :
         if vipurl is None :
             vipurl = 'http://{}:{}/'.format(nsvip, port)
         self._vipurl = vipurl
-        self._sensors = { }
+
+    def _setPrefix( self, prefix ) :
+        self._prefix = prefix
 
     def _getName( self, num ) :
+        assert self._prefix is not None
         return '{}-appliance{:02d}'.format(self._prefix, num)
+
+    def AddLabinfoSensors( self ) :
+        self.AddSensors( self.LabInfo.Sensors )
+
+    def AddSensors( self, sensors ) :
+        for num,ip in sensors :
+            self.AddSensor( num, ip )
 
     def AddSensor( self, num, ip, name=None ) :
         assert ( name is None  and  num is not None ) or ( name is not None  and  num is None )
         if name is None :
             name = self._getName( num )
-        self._sensors[num] = Sensor( name, self, ip, self.Domain )
+        self._sensors[name] = Sensor( name, self, ip, self.Domain )
 
     def GetSensor( self, name=None, num=None ) :
         assert ( name is None  and  num is not None ) or ( name is not None  and  num is None )
         if name is None :
             name = self._getName( num )
+        print self._sensors.keys()
         return self._sensors[name]
 
     ClusterId    = property( lambda self : self._labinfo.ClusterId )
     ClusterIdStr = property( lambda self : self._labinfo.ClusterIdStr )
     LabInfo      = property( lambda self : self._labinfo )
+    Prefix       = property( lambda self : self._prefix, _setPrefix )
     Network      = property( lambda self : self._network )
     VipUrl       = property( lambda self : self._vipurl )
     ServiceUrl   = property( lambda self : self._vipurl )
@@ -226,35 +249,42 @@ class DevLab( NamedHost ) :
 
 
 class Appliance( object ) :
-    def __init__( self, name, rev, ova=None, prop_suffix=None, url=None ) :
+    def __init__( self, name, rev, ova=None, local_file=None, url=None, prop_suffix=None ) :
         assert isinstance(rev, IbVersion)
         assert IbVersion('0.9') <= rev <= IbVersion('1.2')
 
         self._name = name
         self._rev = rev
+        self.Setup( ova, local_file, url )
+        self.PropSuffix = prop_suffix
+
+    def Setup( self, ova=None, local_file=None, url=None ) :
         if ova is None :
-            if rev >= IbVersion('1.1') :
-                ova = 'Qualys-WAF-{}-Appliance_OVF10.ova'.format( name )
+            if self.Rev >= IbVersion('1.1') :
+                ova = 'Qualys-WAF-{}-Appliance_OVF10.ova'.format( self.Name )
             else :
                 ova = 'QualysGuard-WAF_OVF10.ova'
         self._ova = ova
+        if url is None :
+            if local_file is not None :
+                url = 'file://'+local_file
+            else :
+                url = 'http://10.112.129.114/build/{}Appliance.1/exports/ova/{}'.format(self.Name, ova)
+        self._url = url
+
+    def _SetPropSuffix( self, prop_suffix ) :
         if prop_suffix is None :
-            if rev >= IbVersion('1.1') :
-                prop_suffix = 'Qualys_WAF_{}'.format( name )
+            if self.Rev >= IbVersion('1.1') :
+                prop_suffix = 'Qualys_WAF_{}'.format( self.Name )
             else :
                 prop_suffix = 'Qualys_WAF'
         self._prop_suffix = prop_suffix
-        if url is None :
-            if type(ova) == file :
-                url = 'file://'+ova.name
-            else :
-                url = 'http://10.112.129.114/build/{}Appliance.1/exports/ova/{}'.format(name, ova)
-        self._url = url
+
     Name       = property( lambda self : self._name )
     Rev        = property( lambda self : self._rev )
     Ova        = property( lambda self : self._ova )
     Url        = property( lambda self : self._url )
-    PropSuffix = property( lambda self : self._prop_suffix )
+    PropSuffix = property( lambda self : self._prop_suffix, _SetPropSuffix )
 
 
 class VMWareHost( NamedHost ) :
@@ -305,8 +335,27 @@ class VMWareHost( NamedHost ) :
 
 
 class Parser( IbBaseParser ) :
-    def __init__( self, main, appliances, vmhosts, labs ) :
+    def __init__( self, main ) :
         IbBaseParser.__init__( self, "Perform {}".format(main.Description) )
+
+        class ApplianceAction(argparse.Action):
+            @classmethod
+            def Setup( cls, names, patterns ) :
+                cls._patterns = tuple(patterns)
+                cls._names    = ','.join(names)
+            def __call__(self, parser, namespace, values, option_string=None):
+                for pat in self._patterns :
+                    m = pat.match(values)
+                    if m is not None :
+                        namespace.appliance_name = m.group(1)
+                        break
+                else :
+                    parser.error( 'Invalid appliance name "{}"\n\tValid names: {}'
+                                  .format(values,self._names) )
+        self._appliance_names  = tuple([a for a in (list(main.ApplNames)+['file:<name>'])])
+        patterns  = [re.compile('('+a+')$') for a in main.ApplNames]
+        patterns += [re.compile(r'file:(.*)')]
+        ApplianceAction.Setup( self._appliance_names, patterns )
 
         self.Parser.add_argument( '--user', '-u',
                                   action='store', dest='user', default=None,
@@ -326,9 +375,6 @@ class Parser( IbBaseParser ) :
         self.Parser.add_argument( '--vsphere-rev',
                                   action='store', dest='vsphere_rev', default='5.1',
                                   help='Specify vSphere version (default = 5.1' )
-        self.Parser.add_argument( '--ova-file',
-                                  action='store', dest='ovafile', type=argparse.FileType('r'), default=None,
-                                  help='Specify appliance OVA file' )
 
         self.Parser.set_defaults( viphost=None, force=False )
 
@@ -341,25 +387,85 @@ class Parser( IbBaseParser ) :
         # No options for list
 
         p = subparsers.add_parser( 'deploy', help='Deploy a sensor to VCenter' )
-        p.add_argument( 'vmhost', help='VMWare host', choices=vmhosts )
-        p.add_argument( 'lab', help='Development lab name', choices=labs )
+        p.add_argument( 'vmhost', help='VMWare host', choices=main.EsxiNames )
+        p.add_argument( 'lab', help='Development lab name', choices=main.LabNames )
         p.add_argument( 'appliance_num', type=int, help='Appliance number' )
-        p.add_argument( 'which', choices=appliances, help='Specify which appliance' )
+        p.add_argument( 'which', action=ApplianceAction,
+                        help='Specify which appliance ({})'.format(','.join(self._appliance_names)) )
         p.add_argument( 'ip', nargs='?', help='IP Address of VM' )
 
         p.add_argument( '--viphost', action='store', dest='viphost', help='Override VIP host' )
-
         p.add_argument( '--force', '-f', action='store_true', dest='force', help='Force (default = False)' )
         p.add_argument( '--no-force', action='store_false', dest='force', help='Disable force' )
+        p.add_argument( '--ova-name',
+                        action='store', dest='ova_name', default=None,
+                        help='Override name of remote OVA' )
 
 
 class Main( object ) :
     def __init__( self ) :
-        self._esxinames = ['esxi{:02d}'.format(n) for n in range(1, 10)] + ['waf-vm', 'bitter']
-        self._parser = Parser( self,
-                               ('daily', 'dev', 'next', 'prod'),
-                               self._esxinames,
-                               ('dev01', 'dev02', 'dev03', 'qa') )
+        self._InitAppliances( )
+        self._InitNet( )
+        self._InitLabs( )
+        self._InitEsxiHosts( )
+        self._parser = Parser( self )
+
+    def _InitAppliances( self ) :
+        self._appliances = {
+            'daily' : Appliance( 'DailyBuild', rev=IbVersion('1.1') ),
+            'next'  : Appliance( 'NextRelease', rev=IbVersion('1.1') ),
+            'dev'   : Appliance( 'Dev', rev=IbVersion('1.0') ),
+            'prod'  : Appliance( 'Prod', rev=IbVersion('1.0') ),
+        }
+
+    def _InitNet( self ) :
+        self._msn = Domain( 'msn01.qualys.com' )
+        self._nets = {
+            128 : Network( self._msn, '10.112.128' ),
+            129 : Network( self._msn, '10.112.129' ),
+        }
+        nservers = (
+            NamedHost( 'ns1', network=self._nets[128], ip=121 ),
+            NamedHost( 'ns2', network=self._nets[128], ip=122 ),
+        )
+        self._nets[128].AddNameServers( nservers )
+        self._nets[129].AddNameServers( nservers )
+
+    def _InitLabs( self ) :
+        labinfo = (
+            DevLabInfo(
+                'dev01',
+                '9FCB72FB-FF78-498B-8E19-6ADC0180EC29',
+                sensors={ 1:113 }
+            ),
+            DevLabInfo(
+                'dev02',
+                'DD38B5F8-90A5-4858-9D7F-7C726AA13AD4'
+            ),
+            DevLabInfo(
+                'dev03',
+                '38CC7D16-0980-47B7-A19F-1B210F242B5A',
+                sensors={ 1:118, 2:119, 3:120, 4:125 },
+                viphost=2
+            ),
+            DevLabInfo(
+                'qa',
+                'F9804CB8-BBA5-4089-B0AB-2E4B054746B4',
+                sensors={ 1:161, 2:162 }
+            ),
+        )
+        self._labs = dict( )
+        for labinfo in labinfo :
+            domain = Domain( labinfo.Name, parent=self._msn )
+            self._labs[labinfo.Name] = DevLab( labinfo, self._nets[129], domain=domain )
+
+    def _InitEsxiHosts( self ) :
+        names = ['esxi{:02d}'.format(n) for n in range(1, 10)] + ['waf-vm', 'bitter']
+        self._esxi_hosts = dict( [(name,VMWareHost(name, self._msn)) for name in names] )
+
+    EsxiNames   = property( lambda self : self._esxi_hosts.keys() )
+    ApplNames   = property( lambda self : self._appliances.keys() )
+    LabNames    = property( lambda self : self._labs.keys() )
 
     def _Parse( self ) :
         self._args = self._parser.Parse()
@@ -367,65 +473,28 @@ class Main( object ) :
             self._args.user = getpass.getuser( )
         if self._args.prefix is None :
             self._args.prefix = self._args.user
+        if self._args.appliance_name not in self.ApplNames and \
+           not os.path.isfile(self._args.appliance_name) :
+            self._parser.Error( 'Appliance file "{}" does not exist'.format(self._args.appliance_name) )
 
     Description = property( lambda self : 'Deploy appliance' )
 
     def _PostParse( self ) :
-        if not self._args.execute :
-            return
-
-        if self._args.passwd is None :
+        if self._args.execute  and  self._args.passwd is None :
             self._args.passwd = getpass.getpass( 'Enter password for user {}: '.format(self._args.user) )
 
-
-    def _Setup( self ) :
-        self._appliances = {
-            'daily' : Appliance( 'DailyBuild', rev=IbVersion('1.1'), ova=self._args.ovafile ),
-            'next'  : Appliance( 'NextRelease', rev=IbVersion('1.1'), ova=self._args.ovafile ),
-            'dev'   : Appliance( 'Dev', rev=IbVersion('1.0'), ova=self._args.ovafile ),
-            'prod'  : Appliance( 'Prod', rev=IbVersion('1.0'), ova=self._args.ovafile ),
-        }
-        self._labinfo = (
-            DevLabInfo( 'dev01', '9FCB72FB-FF78-498B-8E19-6ADC0180EC29' ),
-            DevLabInfo( 'dev02', 'DD38B5F8-90A5-4858-9D7F-7C726AA13AD4' ),
-            DevLabInfo( 'dev03', '38CC7D16-0980-47B7-A19F-1B210F242B5A', viphost=2 ),
-            DevLabInfo( 'qa',    'F9804CB8-BBA5-4089-B0AB-2E4B054746B4' ),
-        )
-
-        msn = Domain( 'msn01.qualys.com' )
-        net128 = Network( msn, '10.112.128' )
-        net129 = Network( msn, '10.112.129' )
-        nservers = (
-            NamedHost( 'ns1', network=net128, ip=121 ),
-            NamedHost( 'ns2', network=net128, ip=122 ),
-        )
-        net128.AddNameServers( nservers )
-        net129.AddNameServers( nservers )
-
-        self._esxihosts = dict( [(name,VMWareHost(name, msn)) for name in self._esxinames] )
-
-        self._labs = dict( )
-        for labinfo in self._labinfo :
-            domain = Domain( labinfo.Name, parent=msn )
-            self._labs[labinfo.Name] = DevLab( labinfo, net129,
-                                               prefix=self._args.prefix,
-                                               domain=domain,
-                                               viphost=self._args.viphost )
-
-        self._labs['dev01'].AddSensor( 1, 113 )
-        self._labs['dev03'].AddSensor( 1, 118 )
-        self._labs['dev03'].AddSensor( 2, 119 )
-        self._labs['dev03'].AddSensor( 3, 120 )
-        self._labs['dev03'].AddSensor( 4, 125 )
-        self._labs['qa'].AddSensor( 1, 161 )
-        self._labs['qa'].AddSensor( 1, 162 )
+        # Finish setting up lab things with command line values
+        print vars(self._args)
+        for lab in self._labs.values() :
+            lab.Prefix = self._args.prefix
+            lab.AddLabinfoSensors( )
+            lab.SetVip( viphost=self._args.viphost )
 
     def Main( self ) :
         self._Parse( )
         self._PostParse( )
-        self._Setup( )
         if self._args.command == 'list' :
-            print 'ESXI Hosts:', ' '.join( [host.Name for host in self._esxihosts.values()] )
+            print 'ESXI Hosts:', ' '.join( [host.Name for host in self._esxi_hosts.values()] )
             print 'Appliances:', ' '.join( self._appliances.keys() )
             print 'Labs:', ' '.join( self._labs.keys() )
             for key,lab in self._labs.items() :
@@ -433,12 +502,16 @@ class Main( object ) :
             sys.exit( 0 )
 
         lab = self._labs[self._args.lab]
-        vmhost = self._esxihosts[self._args.vmhost]
-        sensor = lab.GetSensor( self._args.appliance_num )
+        vmhost = self._esxi_hosts[self._args.vmhost]
+        sensor = lab.GetSensor( num=self._args.appliance_num )
+        appliance = self._appliances.get(
+            self._args.appliance_name,
+            Appliance('File', rev=IbVersion('1.0'), local_file=self._args.appliance_name)
+        )
         cmd = vmhost.Upload( self._args.user,
                              self._args.passwd,
                              sensor,
-                             self._appliances[self._args.which],
+                             appliance,
                              force=self._args.force )
         if self._args.verbose >= 2 and not self._args.execute :
             print 'Not executing command:'
