@@ -56,6 +56,14 @@ class _Parser( IbHomeVmParser ) :
                                   action="store", dest="group", default=None,
                                   help='Specify group to setup <default=from config>' )
 
+        self.Parser.add_argument( "--gcc-version",
+                                  action="store", dest="gcc_version", default=None,
+                                  help="Specify GCC version to use <Auto>" )
+
+        self.Parser.add_argument( "--ats-version",
+                                  action="store", dest="ats_version", default=None,
+                                  help="Specify ATS version to use <Auto>" )
+
 class _Main( object ) :
     def __init__( self ) :
         self._parser = _Parser( )
@@ -83,6 +91,17 @@ class _Main( object ) :
 
         self._specs.Architecture = self._args.arch
         self._specs.Bits = self._args.bits
+
+        if self._args.gcc_version is not None :
+            self._specs.GccVersion = self._args.gcc_version
+        elif 'GCC_VERSION' in os.environ :
+            self._specs.GccVersion = os.environ['GCC_VERSION']
+
+        if self._args.ats_version is not None :
+            self._specs.AtsVersion = self._args.ats_version
+        elif 'ATS_VERSION' in os.environ :
+            self._specs.AtsVersion = os.environ['ATS_VERSION']
+
 
     def _WipeDirs( self, dirpath, dirs ) :
         assert type(dirpath) == str
@@ -180,6 +199,8 @@ class _Main( object ) :
                 print "Skipping build", build.Name, "Bits don't match:", \
                     build.Bits, '!=', self._specs.Bits
             return False
+
+
 
         return True
             

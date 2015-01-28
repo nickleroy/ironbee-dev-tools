@@ -48,9 +48,10 @@ class IbHomeVmBuild( object ) :
         def __str__( self ) :
             return '"{r.Name}": "{r.FileName}" -> "{r.DestDir}"'.format(r=self)
 
-    _version_re   = re.compile(r'\d+\.\d+(?:\.\d+)?$')
-    _commit_re    = re.compile(r'[0-9a-fA-F]{8,40}$')
-    _config_re    = re.compile(r'(\S*/)?configure(\s.*)?$')
+    _version_re     = re.compile(r'\d+\.\d+(?:\.\d+)?$')
+    _commit_re      = re.compile(r'[0-9a-fA-F]{8,40}$')
+    _config_re      = re.compile(r'(\S*/)?configure(\s.*)?$')
+    _ats_version_re = re.compile(r'\d+\.\d+(?:\.([\dx]+)?(?:-\w+)$')
 
     _item_names = dict( [ (p.Name, p) for p in (
         _DataItem( 'ArchiveDirectory', True,  str ),
@@ -69,6 +70,8 @@ class IbHomeVmBuild( object ) :
                    lambda cls,value : value is None or cls._config_re.match(value) ),
         _DataItem( 'GccVersion',       True,  str,
                    lambda cls,value : cls._version_re.match(value) ),
+        _DataItem( 'AtsVersion',       False, str,
+                   lambda cls,value : cls._ats_version_re.match(value) ),
     ) ] )
 
     def __init__( self ) :

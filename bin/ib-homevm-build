@@ -57,6 +57,10 @@ class _Parser( IbHomeVmParser ) :
                                   action="store", dest="gcc_version", default=None,
                                   help="Specify GCC version to use <auto>" )
 
+        self.Parser.add_argument( "--ats-version",
+                                  action="store", dest="ats_version", default=None,
+                                  help="Specify ATS version to use <auto>" )
+
         self.Parser.add_argument( "--ib-build-dir",
                                   action="store", dest="ib_build", default='.',
                                   help="Specify IronBee build directory <.>" )
@@ -128,6 +132,14 @@ class _Main( object ) :
         except OSError as e :
             raise DetectionError("Unable to detect gcc version:"+str(e))
 
+    def _DetectAtsVersion( self ) :
+        if self._args.ats_version is not None :
+            return self._args.ats_version
+        elif 'ATS_VERSION' in os.environ :
+            return os.environ['ATS_VERSION']
+        else :
+            raise DetectionError("Unable to detect ATS version!")
+
     def _DetectIronBeeVersion( self ) :
         if self._args.ib_version is None :
             libdir = os.environ['IB_LIBDIR']
@@ -163,6 +175,7 @@ class _Main( object ) :
             self._vm.Architecture = self._args.arch
             self._vm.Bits = self._args.bits
             self._vm.GccVersion = self._DetectGccVersion( )
+            self._vm.AtsVersion = self._DetectAtsVersion( )
             self._vm.IronBeeVersion = self._DetectIronBeeVersion( )
             self._vm.BuildConfig = self._ReadBuildConfig( )
             if self._vm.BuildConfig is not None :
@@ -176,7 +189,7 @@ class _Main( object ) :
                 self._DetectGitBranch( self._args.etc_branch, os.environ['QLYS_ETC_IN'] )
             self._vm.TimeStamp = self._args.timestamp
             self._archive_dir = self._vm.GetPath( self._args.builds )
-            self._ts_name = 'trafficserver-'+os.environ['ATS_VERSION']
+            self._ts_name = 'trafficserver-'+self._vm.AtsVersion
             if not self.Quiet :
                 print 'Archives will be stored in "'+self._archive_dir
         except DetectionError as e:
@@ -239,7 +252,7 @@ class _Main( object ) :
         os.chdir( self._args.build_root )
         tball.add( 'gcc',
                    filter=functools.partial(self._ArchiveFilter, []) )
-        tball.add( 'gcc-'+self._vm.GccVersion+'/install',
+        tball.add( os.environ.get('IB_BUILD','gcc-'+self._vm.GccVersion)+'/install',
                    filter=functools.partial(self._ArchiveFilter, []) )
         tball.close( )
         self._vm.AddArchive( 'build', 'build.tar.bz2', self._args.build_root )
