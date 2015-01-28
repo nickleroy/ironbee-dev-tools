@@ -341,7 +341,7 @@ class Parser( IbBaseParser ) :
         # No options for list
 
         p = subparsers.add_parser( 'deploy', help='Deploy a sensor to VCenter' )
-        p.add_argument( 'vmhost', help='VMWare host', nargs='?', choices=vmhosts )
+        p.add_argument( 'vmhost', help='VMWare host', choices=vmhosts )
         p.add_argument( 'lab', help='Development lab name', choices=labs )
         p.add_argument( 'appliance_num', type=int, help='Appliance number' )
         p.add_argument( 'which', choices=appliances, help='Specify which appliance' )
