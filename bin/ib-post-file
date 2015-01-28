@@ -75,7 +75,7 @@ class _Parser( IbBaseParser ) :
         self.Parser.add_argument( "content_type", help='Content-type' )
 
         class SizeAction(IbBaseParser.SizeAction):
-            def SetSize( self, parser, namespace, option_string, value ) :
+            def SetValue( self, parser, namespace, option_string, value ) :
                 namespace.blocksize  = value
         self.Parser.add_argument( "--blocksize", "-b",
                                   action=SizeAction, default=8192,

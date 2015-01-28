@@ -22,25 +22,42 @@ import argparse
 
 
 class IbBaseParser( object ) :
-    class SizeAction(argparse.Action):
-        __mults = { 'k':1024, 'K':1000,
-                    'm':1024*1024, 'M':1000*1000,
-                    'g':1024*1024*1024, 'G':1000*1000*1000, }
-        __keys = tuple(__mults.keys())
+    class MultAction(argparse.Action) :
+        @classmethod
+        def _InitClass( cls, table ) :
+            assert type(table) == dict
+            cls._mults = table
+            cls._keys = tuple(table.keys())
 
-        def SetSize( self, parser, namespace, option_string, value ) :
+        def SetValue( self, parser, namespace, option_string, value ) :
             assert False
+
         def __call__(self, parser, namespace, param, option_string=None):
             strval = param
             mult = 1
-            if strval.endswith( self.__keys ) :
-                mult = self.__mults[strval[-1]]
+            if strval.endswith( self._keys ) :
+                mult = self._mults[strval[-1]]
                 strval = strval[:-1]
             try :
-                value = int(strval) * mult
-                self.SetSize( parser, namespace, option_string, value )
+                value = float(strval) * mult
+                self.SetValue( parser, namespace, option_string, value )
             except ValueError :
                 parser.error( "Invalid value '"+strval+"'" )
+
+    class SizeAction(MultAction) :
+        def __init__( self, *args, **kwargs ) :
+            self._InitClass( { 'k':1024, 'K':1000,
+                               'm':1024*1024, 'M':1000*1000,
+                               'g':1024*1024*1024, 'G':1000*1000*1000, } )
+            argparse.Action.__init__( self, *args, **kwargs )
+
+    class TimeAction(MultAction) :
+        def __init__( self, *args, **kwargs ) :
+            self._InitClass( { 's':1.0, 'm':60, 'h':60*60,
+                               'd':24*60*60, 'w':7*24*60*60,
+                               'M':30*24*60*60, 'y':365.24*24*60*60, } )
+            argparse.Action.__init__( self, *args, **kwargs )
+
 
     """
     Set up a basic parser for IronBee Python scripts.
@@ -76,6 +93,9 @@ class IbBaseParser( object ) :
 
     def Error( self, text ) :
         self._parser.error( text )
+
+class IbModule_util_parser( object ) :
+    modulePath = __file__
 
 if __name__ == "__main__" :
     parser = IbBaseParser("Test")
