@@ -24,7 +24,15 @@ from ib.util.parser import *
 
 class Parser( IbBaseParser ) :
     def __init__( self, main ) :
-        IbBaseParser.__init__( self, "Perform {}".format(main.Description) )
+        IbBaseParser.__init__( self, "Perform {}".format(main.Description),
+                               formatter_class=argparse.RawDescriptionHelpFormatter,
+                               epilog=\
+'''
+Examples:
+   ib-publish ./dev03/ /var/tmp/nleroy/waf-sensor-1.1.x-15/
+   ib-publish /var/www/html/repo/dev03/ /var/tmp/nleroy/waf-sensor-1.1.x-16/
+'''
+ )
 
         self.Parser.add_argument( dest='destroot', help='Destination root' )
         self.Parser.add_argument( dest='files', default=[], nargs='+',
@@ -96,7 +104,6 @@ class Main( object ) :
     def Main( self ) :
         self._Setup( )
         self._Parse( )
-        print vars(self._args)
         files = self._GetFiles( self._args.files )
         self._Run( self._args.destroot, files )
 
