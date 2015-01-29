@@ -336,7 +336,16 @@ class VMWareHost( NamedHost ) :
 
 class Parser( IbBaseParser ) :
     def __init__( self, main ) :
-        IbBaseParser.__init__( self, "Perform {}".format(main.Description) )
+        IbBaseParser.__init__( self, "Perform {}".format(main.Description),
+                               formatter_class=argparse.RawDescriptionHelpFormatter,
+                               epilog=\
+'''
+Examples:
+   ib-deploy-labapp.py list
+   ib-deploy-labapp.py -v deploy esxi06 dev03 1 next
+   ib-deploy-labapp.py deploy esxi06 dev03 1 file:Qualys-WAF-Dev-Appliance_OVF10.ova -f
+'''
+        )
 
         class ApplianceAction(argparse.Action):
             @classmethod
@@ -473,18 +482,18 @@ class Main( object ) :
             self._args.user = getpass.getuser( )
         if self._args.prefix is None :
             self._args.prefix = self._args.user
-        if self._args.appliance_name not in self.ApplNames and \
+        if self._args.command != "list"  and \
+           self._args.appliance_name not in self.ApplNames and \
            not os.path.isfile(self._args.appliance_name) :
             self._parser.Error( 'Appliance file "{}" does not exist'.format(self._args.appliance_name) )
 
     Description = property( lambda self : 'Deploy appliance' )
 
     def _PostParse( self ) :
-        if self._args.execute  and  self._args.passwd is None :
+        if self._args.command != "list"  and  self._args.execute  and  self._args.passwd is None :
             self._args.passwd = getpass.getpass( 'Enter password for user {}: '.format(self._args.user) )
 
         # Finish setting up lab things with command line values
-        print vars(self._args)
         for lab in self._labs.values() :
             lab.Prefix = self._args.prefix
             lab.AddLabinfoSensors( )
@@ -494,11 +503,12 @@ class Main( object ) :
         self._Parse( )
         self._PostParse( )
         if self._args.command == 'list' :
-            print 'ESXI Hosts:', ' '.join( [host.Name for host in self._esxi_hosts.values()] )
-            print 'Appliances:', ' '.join( self._appliances.keys() )
-            print 'Labs:', ' '.join( self._labs.keys() )
+            print 'List of known items:'
+            print '  ESXI Hosts:', ' '.join( [host.Name for host in self._esxi_hosts.values()] )
+            print '  Appliances:', ' '.join( self._appliances.keys() )
+            print '  Labs:', ' '.join( self._labs.keys() )
             for key,lab in self._labs.items() :
-                print '  {} sensors: {}'.format( key, ' '.join([s.Name for s in lab.Sensors]) )
+                print '    {} sensors: {}'.format( key, ' '.join([s.Name for s in lab.Sensors]) )
             sys.exit( 0 )
 
         lab = self._labs[self._args.lab]
