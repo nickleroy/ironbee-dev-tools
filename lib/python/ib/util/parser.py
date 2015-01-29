@@ -62,10 +62,10 @@ class IbBaseParser( object ) :
     """
     Set up a basic parser for IronBee Python scripts.
     """
-    def __init__( self, description ) :
-        parser = argparse.ArgumentParser(
-            description=description,
-            prog=os.path.basename(sys.argv[0]) )
+    def __init__( self, description, *args, **kwargs ) :
+        parser = argparse.ArgumentParser( description=description,
+                                          prog=os.path.basename(sys.argv[0]),
+                                          *args, **kwargs)
         self._parser = parser
 
         group = self.Parser.add_argument_group( )
