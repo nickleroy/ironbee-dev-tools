@@ -244,7 +244,6 @@ class Main( object ) :
     def Main( self ) :
         self._Setup( )
         self._Parse( )
-        self._Setup( )
         self._RunLoops( )
         if self._args.shutdown :
             self._Disable( )
