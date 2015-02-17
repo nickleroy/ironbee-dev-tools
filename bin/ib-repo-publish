@@ -18,6 +18,7 @@
 import re
 import os
 import sys
+import time
 import subprocess
 from ib.util.parser import *
 
@@ -29,8 +30,8 @@ class Parser( IbBaseParser ) :
                                epilog=\
 '''
 Examples:
-   ib-publish ./dev03/ /var/tmp/nleroy/waf-sensor-1.1.x-15/
-   ib-publish /var/www/html/repo/dev03/ /var/tmp/nleroy/waf-sensor-1.1.x-16/
+   ib-repo-publish ./dev03/ /var/tmp/nleroy/waf-sensor-1.1.x-15/
+   ib-repo-publish /var/www/html/repo/dev03/ /var/tmp/nleroy/waf-sensor-1.1.x-16/
 '''
  )
 
@@ -106,8 +107,10 @@ class Main( object ) :
         self._Parse( )
         files = self._GetFiles( self._args.files )
         self._Run( self._args.destroot, files )
+        if not self._args.quiet :
+            print 'Finished @ {}'.format(time.asctime())
 
-    Description = property( lambda self : 'Template' )
+    Description = property( lambda self : 'Publish files to YUM repository' )
 
 
 main = Main( )
