@@ -22,6 +22,7 @@ import argparse
 import subprocess
 import getpass
 import uuid
+import time
 
 from ib.util.parser import *
 from ib.util.version import *
@@ -530,6 +531,8 @@ class Main( object ) :
             print 'Executing:', cmd
         if self._args.execute :
             subprocess.call( cmd )
+        if not self._args.quiet :
+            print 'Finished @ {}'.format(time.asctime())
 
 main = Main( )
 main.Main( )
