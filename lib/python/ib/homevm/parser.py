@@ -46,10 +46,10 @@ class IbHomeVmParser( IbBaseParser ) :
                                           action="store", dest="build_root", default=build_root,
                                           help="Specify alternate directory <"+build_root+">" )
 
-        builds = os.environ['QLYS_BUILDS']
-        self.Parser.add_argument( "--builds",
-                                  action="store", dest="builds", default=builds,
-                                  help="Specify builds directory <"+builds+">" )
+        archives = os.environ['QLYS_ARCHIVES']
+        self.Parser.add_argument( "--archives",
+                                  action="store", dest="archives", default=archives,
+                                  help="Specify archives directory <"+archives+">" )
 
         config = os.path.join(os.environ['QLYS_DEV_ETC'], 'ib-homevm.conf')
         self.Parser.add_argument( "--config",

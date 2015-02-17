@@ -39,7 +39,7 @@ class DetectionError(BaseException) : pass
 
 class _Parser( IbHomeVmParser ) :
     def __init__( self ) :
-        IbHomeVmParser.__init__( self, "Program to build an archive for VMs" )
+        IbHomeVmParser.__init__( self, "Program to create a build archive for VMs" )
 
         self.Parser.add_argument( "--ib-version",
                                   action="store", dest="ib_version", default=None,
@@ -188,7 +188,7 @@ class _Main( object ) :
             (self._vm.EtcInGitBranch, self._vm.EtcInGitCommit) = \
                 self._DetectGitBranch( self._args.etc_branch, os.environ['QLYS_ETC_IN'] )
             self._vm.TimeStamp = self._args.timestamp
-            self._archive_dir = self._vm.GetPath( self._args.builds )
+            self._archive_dir = self._vm.GetPath( self._args.archives )
             self._ts_name = 'trafficserver-'+self._vm.AtsVersion
             if not self.Quiet :
                 print 'Archives will be stored in "'+self._archive_dir
@@ -337,7 +337,7 @@ class _Main( object ) :
         self._vm.AddArchive( 'etc-in', 'etc.in.tar.bz2', os.environ['QLYS_LOCAL'] )
 
     def _CreateSummary( self ) :
-        self._vm.WriteArchiveData( self._args.builds )
+        self._vm.WriteArchiveData( self._args. )
 
     def _CreateArchives( self ) :
         self._archives = [ ]

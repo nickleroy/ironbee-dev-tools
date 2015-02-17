@@ -117,10 +117,12 @@ class IbHomeVmBuild( object ) :
         return self._items.get(name, default)
 
     # Vm time stamp format for strftime()
-    _TimeStampFormat = '%y%m%d-%H%M%S'
+    _TimeStampFormat = '%Y-%m-%d-%H:%M:%S'
     @classmethod
     def FormatTime( cls, when ) :
-        return time.strftime( cls._TimeStampFormat, time.localtime(when) )
+        s1 = time.strftime( cls._TimeStampFormat, time.localtime(when) )
+        s2 = '{:.02f}'.format(when).split('.')[1]
+        return s1+'.'+s2
 
     TimeString = property( lambda self : self.FormatTime(self.TimeStamp) )
 
@@ -128,12 +130,9 @@ class IbHomeVmBuild( object ) :
         if self.Name is not None :
             return self.Name
         try :
-            base = "{:s}-{:s}-{:s}-{:s}".format(self.IronBeeGitBranch,
-                                                self.IronBeeVersion.Format( ),
-                                                self.Architecture,
-                                                self.TimeString )
-            self.Name = base
-            return base
+            ts = self.TimeString
+            self.Name = ts
+            return ts
         except KeyError as e :
             raise IbHomeVmException( "Missing items:"+str(e) )
             

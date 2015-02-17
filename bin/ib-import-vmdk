@@ -98,7 +98,7 @@ class _Main( object ) :
             prefix3  = '{}_homequalys{}.{}-{}'.format( self.OS, self.Bits, self.Arch, self.Version )
 
         tarname  = '{}.ovf.tar.gz'.format(prefix3)
-        basedir  = os.path.join( base, 'images', prefix1, self.Version )
+        basedir  = os.path.join( base, 'os-images', prefix1, self.Version )
 
         if not os.path.isdir(basedir) :
             print 'Base directory "{}" does not exist'.format(basedir)
