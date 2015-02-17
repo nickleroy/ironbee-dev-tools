@@ -28,6 +28,7 @@ import collections
 from functools import partial
 import imp
 import resource
+import platform
 
 from ib.util.dict           import *
 from ib.util.expander       import *
@@ -308,51 +309,84 @@ class _ServerDags( IbServerDags ) :
 _Generator = collections.namedtuple( 'Generator', ( 'Name', 'Module', 'Generator' ) )
 
 class IbServerMain( object ) :
-    _tools = None
+    _tools       = None
+    _sys         = None
+    _global_defs = None
 
     @classmethod
     def _InitClass( cls ) :
-        if cls._tools is not None :
-            return
+        if cls._tools is None :
+            cls._InitTools( )
+        if cls._sys is None :
+            cls._InitSys( )
+        if cls._global_defs is None :
+            cls._InitGlobalDefs( )
+
+    @classmethod
+    def _InitTools( cls ) :
         cls._tools = { }
         regex = re.compile( r'IbServerTool\w+Tools' )
         for name in globals().keys() :
             if regex.match(name) :
                 cls._tools.update( globals()[name] )
 
-    _global_defs = {
-        "PID"              : str(os.getpid()),
-        "Run"              : "${PID}",
-        "Devel"            : os.environ["QLYS_DEVEL"],
-        "Var"              : os.environ.get("QLYS_VAR", "${Devel}/var"),
-        "BaseLogDir"       : "${Var}/log",
-        "VarRun"           : "${Var}/run",
-        "Etc"              : os.environ.get("QLYS_ETC", "${Devel}/etc"),
-        "EtcIn"            : os.environ.get("QLYS_ETC_IN", "${Devel}/etc.in"),
-        "Tmp"              : os.environ["QLYS_TMP"],
-        "Cmd"              : [ "${Executable}", "${Args}" ],
-        "IbInstall"        : os.environ["IB_INSTALL"],
-        "IbLibDir"         : os.environ["IB_LIBDIR"],
-        "IbLogDir"         : "${BaseLogDir}/ironbee",
-        "IbEtc"            : "${Etc}/ironbee",
-        "IbEtcIn"          : "${EtcIn}/ironbee",
-        "IbEnable"         : True,
-        "IbGenerator"      : "${IbEtcIn}/ib_generator.py",
-        "IbConfigFile"     : "${ServerNameShort}.conf",
-        "IbConfig"         : "${IbEtc}/${IbConfigFile}",
-        "IbVersion"        : None,
-        "TxLogDir"         : "${IbLogDir}/txlogs",
-        "RnsEtc"           : "${Etc}/rns-ironbee",
-        "RnsEtcIn"         : "${EtcIn}/rns-ironbee",
-        "RnsGenerator"     : "${EtcIn}/rns-ironbee/rns_generator.py",
-        "IbLogLevel"       : "debug",
-        "IbRuleLogLevel"   : "debug",
-        "IbRuleDebugLevel" : "debug",
-        "LastFile"         : '.ib-${ServerNameLower}.last',
-        "LuaDir"           : os.path.join("${IbLibDir}", "lua"),
-        "LuaPath"          : ";".join([s+"/?.lua" for s in
-                                       ("${IbLibDir}", "${LuaDir}", "${Etc}/ironbee")]),
-    }
+    @classmethod
+    def _InitSys( cls ) :
+        def _sys_get( env, _type, default ) :
+            if env in os.environ :
+                return _type(os.environ.get(env))
+            else :
+                return _type(default)
+
+        arch = platform.architecture()
+        bits = int(re.match(r'(\d+)bit', arch[0]).group(1))
+        distro = platform.linux_distribution( )
+        lib = 'lib'+str(bits) if bits > 32 else 'lib'
+        cls._sys = {
+            'bits'    : _sys_get('SYS_BITS', int, bits),
+            'distro'  : _sys_get('SYS_DISTRO_FULL', str, '-'.join([s.strip() for s in distro]) ),
+            'arch'    : _sys_get('SYS_ARCH', str, distro[2]),
+            'lib'     : _sys_get('SYS_LIB', str, lib),
+            'libexec' : _sys_get('SYS_LIBEXEC', str, 'libexec' if len(glob.glob('/usr/libexec/*')) else 'lib' )
+        }
+
+    @classmethod
+    def _InitGlobalDefs( cls ) :
+        cls._global_defs = {
+            "PID"              : str(os.getpid()),
+            "Run"              : "${PID}",
+            "SysLibName"       : cls._sys['lib'],
+            "SysLibExec"       : cls._sys['libexec'],
+            "Devel"            : os.environ["QLYS_DEVEL"],
+            "Var"              : os.environ.get("QLYS_VAR", "${Devel}/var"),
+            "BaseLogDir"       : "${Var}/log",
+            "VarRun"           : "${Var}/run",
+            "Etc"              : os.environ.get("QLYS_ETC", "${Devel}/etc"),
+            "EtcIn"            : os.environ.get("QLYS_ETC_IN", "${Devel}/etc.in"),
+            "Tmp"              : os.environ["QLYS_TMP"],
+            "Cmd"              : [ "${Executable}", "${Args}" ],
+            "IbInstall"        : os.environ["IB_INSTROOT"],
+            "IbLibDir"         : os.environ["IB_LIBDIR"],
+            "IbLogDir"         : "${BaseLogDir}/ironbee",
+            "IbEtc"            : "${Etc}/ironbee",
+            "IbEtcIn"          : "${EtcIn}/ironbee",
+            "IbEnable"         : True,
+            "IbGenerator"      : "${IbEtcIn}/ib_generator.py",
+            "IbConfigFile"     : "${ServerNameShort}.conf",
+            "IbConfig"         : "${IbEtc}/${IbConfigFile}",
+            "IbVersion"        : None,
+            "TxLogDir"         : "${IbLogDir}/txlogs",
+            "RnsEtc"           : "${Etc}/rns-ironbee",
+            "RnsEtcIn"         : "${EtcIn}/rns-ironbee",
+            "RnsGenerator"     : "${EtcIn}/rns-ironbee/rns_generator.py",
+            "IbLogLevel"       : "debug",
+            "IbRuleLogLevel"   : "debug",
+            "IbRuleDebugLevel" : "debug",
+            "LastFile"         : '.ib-${ServerNameLower}.last',
+            "LuaDir"           : os.path.join("${IbLibDir}", "lua"),
+            "LuaPath"          : ";".join([s+"/?.lua" for s in
+                                           ("${IbLibDir}", "${LuaDir}", "${Etc}/ironbee")]),
+        }
 
     _log_levels = (
         "emergency",
