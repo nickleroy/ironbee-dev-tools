@@ -120,10 +120,22 @@ class ExecTarget( BaseTarget ) :
     def AddArgs( self, args ) :
         self._argv += self._MakeList(args)
 
+    def _FindSysProgram( self, prog, paths=None, pathenv=True ) :
+        if paths is None :
+            if pathenv :
+                paths = os.environ['PATH'].split(':')
+            else :
+                paths = ( '/usr/local/bin', '/usr/bin', '/bin' )
+        for d in paths :
+            full = os.path.join( d, prog )
+            if os.path.isfile( full ) :
+                return full
+        else :
+            assert False, 'Can\'t find program "{}!'.format(prog)
+
     def GetCommand( self, nice=None, prefix=None, args=None ) :
         command = []
-        if nice is not None  and  nice != 0 :
-            command += [ "/usr/bin/nice", "-"+str(nice) ]
+        command += [ self._FindSysProgram('nice'), "-"+str(nice) ]
         if prefix is not None :
             command += self._MakeList( prefix )
         command += self._argv
@@ -156,7 +168,7 @@ class ExecTarget( BaseTarget ) :
 class MakeTarget( ExecTarget ) :
     def __init__( self, name, phase, flags, pre_fn=None, targets=None, force_one=False,
                   directory=None ) :
-        ExecTarget.__init__( self, name, phase, flags, pre_fn, "/usr/bin/make" )
+        ExecTarget.__init__( self, name, phase, flags, pre_fn, self._FindSysProgram('make') )
         self._dir = directory
         self._targets = self._MakeTuple(targets, name)
         self._force_one = force_one
