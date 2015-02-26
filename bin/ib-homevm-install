@@ -32,7 +32,7 @@ import tarfile
 import stat
 
 from ib.homevm.exceptions import *
-from ib.homevm.build      import *
+from ib.homevm.archive    import *
 from ib.homevm.config     import *
 from ib.homevm.parser     import *
 
@@ -59,6 +59,16 @@ class _Parser( IbHomeVmParser ) :
         self.Parser.add_argument( "--gcc-version",
                                   action="store", dest="gcc_version", default=None,
                                   help="Specify GCC version to use <Auto>" )
+        self.Parser.add_argument( "--clang-version",
+                                  action="store", dest="clang_version", default=None,
+                                  help="Specify clang version to use <Auto>" )
+        self.Parser.add_argument( "--clang-tsan",
+                                  action="store_true", dest="clang_tsan", default=False,
+                                  help="Require clang thread santized version to use <Auto>" )
+        self.Parser.add_argument( "--compiler",
+                                  action="store", dest="compiler", default=None,
+                                  choices=('clang','gcc'),
+                                  help="Specify compiler to use <Auto>" )
 
         self.Parser.add_argument( "--ats-version",
                                   action="store", dest="ats_version", default=None,
@@ -76,7 +86,7 @@ class _Main( object ) :
         self._config = config.Read( )
 
     def _MergeConfig( self ) :
-        self._specs = IbHomeVmBuild( )
+        self._specs = IbHomeVmArchive( )
         defaults = self._config['install']['defaults']
 
         if self._args.ib_version is not None :
@@ -92,10 +102,23 @@ class _Main( object ) :
         self._specs.Architecture = self._args.arch
         self._specs.Bits = self._args.bits
 
-        if self._args.gcc_version is not None :
+        if self._args.compiler is not None :
+            self._specs.Compiler = self._args.compiler
+        elif 'COMPILER' in os.environ :
+            self._specs.Compiler = os.environ['COMPILER']
+
+        if self._specs.Compiler == 'gcc'  and  self._args.gcc_version is not None :
             self._specs.GccVersion = self._args.gcc_version
         elif 'GCC_VERSION' in os.environ :
             self._specs.GccVersion = os.environ['GCC_VERSION']
+
+        if self._specs.Compiler == 'clang'  and  self._args.clang_version is not None :
+            self._specs.ClangVersion = self._args.clang_version
+        elif 'CLANG_VERSION' in os.environ :
+            self._specs.ClangVersion = os.environ['CLANG_VERSION']
+
+        if self._specs.Compiler == 'clang'  and  self._args.clang_tsan :
+            self._specs.ClangThreadSantizer = True
 
         if self._args.ats_version is not None :
             self._specs.AtsVersion = self._args.ats_version
@@ -124,17 +147,17 @@ class _Main( object ) :
                             os.chmod( fp, stat.S_IRWXU )
                 shutil.rmtree( fullpath )
 
-    def _PopulateDirectory( self, build, name, wipe=False ) :
-        archive = build.GetArchive( name )
-        if not os.path.exists( archive.DestDir ) :
-            os.makedirs( archive.DestDir )
-            user.ChownDir( archive.DestDir )
-        tarball = os.path.join( build.ArchiveDirectory, archive.FileName )
+    def _PopulateDirectory( self, archive, name, wipe=False ) :
+        tball = archive.GetArchive( name )
+        if not os.path.exists( tball.DestDir ) :
+            os.makedirs( tball.DestDir )
+            user.ChownDir( tball.DestDir )
+        tarball = os.path.join( archive.ArchiveDirectory, tball.FileName )
         if not os.path.isfile( tarball ) :
             print >>sys.stderr, "Archive", tarball, "doesn not exist"
             sys.exit(1)
         try :
-            print "Populating", archive.DestDir, "from", tarball
+            print "Populating", tball.DestDir, "from", tarball
             regex = re.compile( r'(\.?/)?([^\/]+)/' )
             tar = tarfile.open( tarball )
             top = set()
@@ -150,75 +173,95 @@ class _Main( object ) :
                 if wipe is None or wipe == False :
                     pass
                 elif wipe == True :
-                    self._WipeDirs( archive.DestDir, top )
+                    self._WipeDirs( tball.DestDir, top )
                 elif type(wipe) in (list, tuple) :
-                    self._WipeDirs( archive.DestDir, wipe )
+                    self._WipeDirs( tball.DestDir, wipe )
                 else :
                     assert False, str(wipe)
-                tar.extractall( path=archive.DestDir )
+                tar.extractall( path=tball.DestDir )
                 if os.geteuid() == 0 :
-                    user.ChownDir( archive.DestDir )
+                    user.ChownDir( tball.DestDir )
         except tarfile.TarError as e :
             print >>sys.stderr, 'Error extracting from tarball "%s": %s' % ( tarball, e )
             sys.exit(1)
 
-    def _ExtractTarballs( self, build ) :
-        self._PopulateDirectory( build, "build",  wipe=True )
-        self._PopulateDirectory( build, "local",  wipe=('opt', 'share', 'etc', 'etc.in') )
-        self._PopulateDirectory( build, "etc-in", wipe=True )
+    def _ExtractTarballs( self, archive ) :
+        self._PopulateDirectory( archive, "local",  wipe=('opt', 'share', 'etc', 'etc.in') )
+        self._PopulateDirectory( archive, "etc-in", wipe=True )
         etc = os.environ['QLYS_ETC']
         if self.Execute :
             if os.path.exists( etc ) :
                 shutil.rmtree( etc )
             os.makedirs( etc )
-            build.WriteArchiveData( etc )
+            archive.WriteArchiveData( etc )
 
-    def _BuildFilter( self, build ) :
+    def _ArchiveFilter( self, archive ) :
         if self._specs.IronBeeVersion is not None and \
-           self._specs.IronBeeVersion != build.IronBeeVersion :
+           self._specs.IronBeeVersion != archive.IronBeeVersion :
             if self.Verbose >= 2 :
-                print "Skipping build", build.Name, "IronBee versions don't match:", \
-                    self._specs.IronBeeVersion, build.IronBeeVersion
+                print "Skipping archive", archive.Name, "IronBee versions don't match:", \
+                    self._specs.IronBeeVersion, archive.IronBeeVersion
             return False
 
         if self._specs.IronBeeGitBranch is not None and \
-           build.IronBeeGitBranch != self._specs.IronBeeGitBranch :
+           archive.IronBeeGitBranch != self._specs.IronBeeGitBranch :
             if self.Verbose >= 2 :
-                print "Skipping build", build.Name, "IronBee versions don't match:", \
-                    build.IronBeeGitBranch, '!=', self._specs.IronBeeGitBranch
+                print "Skipping archive", archive.Name, "IronBee versions don't match:", \
+                    archive.IronBeeGitBranch, '!=', self._specs.IronBeeGitBranch
             return False
 
-        if self._specs.Architecture != build.Architecture :
+        if self._specs.Compiler != archive.Compiler :
             if self.Verbose >= 2 :
-                print "Skipping build", build.Name, "Architectures don't match:", \
-                    build.Architecture, '!=', self._specs.Architecture
+                print "Skipping archive", archive.Name, "compilers don't match:", \
+                    archive.Compiler, '!=', self._specs.Compiler
             return False
 
-        if self._specs.Bits != build.Bits :
+        if self._specs.Compiler == 'gcc' and self._specs.GccVersion != archive.GccVersion :
             if self.Verbose >= 2 :
-                print "Skipping build", build.Name, "Bits don't match:", \
-                    build.Bits, '!=', self._specs.Bits
+                print "Skipping archive", archive.Name, "GCC versions don't match:", \
+                    archive.GccVersion, '!=', self._specs.GccVersion
             return False
 
+        if self._specs.Compiler == 'clang' :
+            if self._specs.ClangVersion != archive.ClangVersion :
+                if self.Verbose >= 2 :
+                    print "Skipping archive", archive.Name, "clang versions don't match:", \
+                        archive.ClangVersion, '!=', self._specs.ClangVersion
+                return False
+            if self._specs.ClangThreadSanitizer != archive.ClangThreadSanitizer :
+                if self.Verbose >= 2 :
+                    print "Skipping archive", archive.Name, "clang versions don't match:", \
+                        archive.ClangVersion, '!=', self._specs.ClangVersion
+                return False
 
+        if self._specs.Architecture != archive.Architecture :
+            if self.Verbose >= 2 :
+                print "Skipping archive", archive.Name, "Architectures don't match:", \
+                    archive.Architecture, '!=', self._specs.Architecture
+            return False
 
+        if self._specs.Bits != archive.Bits :
+            if self.Verbose >= 2 :
+                print "Skipping archive", archive.Name, "Bits don't match:", \
+                    archive.Bits, '!=', self._specs.Bits
+            return False
         return True
             
 
     def _SelectArchive( self ) :
-        vms = IbHomeVmBuildSet( self._args.builds )
+        vms = IbHomeVmArchiveSet( self._args.archives )
         vms.ReadAll( )
-        build = None
-        for a in vms.Builds( self._BuildFilter ) :
-            if build is None :
-                build = a
-            elif a.IronBeeVersion > build.IronBeeVersion :
-                build = a
-            elif a.TimeStamp > build.TimeStamp :
-                build = a
-        if not self.Quiet  and  build is not None:
-            print "Selected", build.Name
-        return build
+        archive = None
+        for a in vms.Archives( self._ArchiveFilter ) :
+            if archive is None :
+                archive = a
+            elif a.IronBeeVersion > archive.IronBeeVersion :
+                archive = a
+            elif a.TimeStamp > archive.TimeStamp :
+                archive = a
+        if not self.Quiet  and  archive is not None:
+            print "Selected", archive.Name
+        return archive
 
     Execute = property( lambda self : self._args.execute )
     Verbose = property( lambda self : self._args.verbose )
@@ -228,11 +271,11 @@ class _Main( object ) :
         self._ParseCmdLine( )
         self._ReadConfig( )
         self._MergeConfig( )
-        build = self._SelectArchive( )
-        if build is None :
+        archive = self._SelectArchive( )
+        if archive is None :
             print >>sys.stderr, "No matching archives found!"
             sys.exit( 1 )
-        self._ExtractTarballs( build )
+        self._ExtractTarballs( archive )
 
 main = _Main( )
 main.Main( )

@@ -22,8 +22,8 @@ import time
 from ib.util.version      import *
 from ib.homevm.exceptions import *
 
-# Build vm
-class IbHomeVmBuild( object ) :
+# Home VM Archive
+class IbHomeVmArchive( object ) :
     class _DataItem( object ) :
         def __init__( self, name, required, _type, validator=None, getfn=None ) :
             assert validator is None  or  callable(validator)
@@ -51,7 +51,7 @@ class IbHomeVmBuild( object ) :
     _version_re     = re.compile(r'\d+\.\d+(?:\.\d+)?$')
     _commit_re      = re.compile(r'[0-9a-fA-F]{8,40}$')
     _config_re      = re.compile(r'(\S*/)?configure(\s.*)?$')
-    _ats_version_re = re.compile(r'\d+\.\d+(?:\.([\dx]+)?(?:-\w+)$')
+    _ats_version_re = re.compile(r'\d+(\.(\d+|x)){1,3}(?:-\w+)?$')
 
     _item_names = dict( [ (p.Name, p) for p in (
         _DataItem( 'ArchiveDirectory', True,  str ),
@@ -68,8 +68,12 @@ class IbHomeVmBuild( object ) :
                    lambda cls,value : cls._commit_re.match(value) ),
         _DataItem( 'BuildConfig',      False, str,
                    lambda cls,value : value is None or cls._config_re.match(value) ),
+        _DataItem( 'Compiler',         True,  str ),
         _DataItem( 'GccVersion',       True,  str,
                    lambda cls,value : cls._version_re.match(value) ),
+        _DataItem( 'ClangVersion',     True,  str,
+                   lambda cls,value : cls._version_re.match(value) ),
+        _DataItem( 'ClangThreadSanitizer', True, bool ),
         _DataItem( 'AtsVersion',       False, str,
                    lambda cls,value : cls._ats_version_re.match(value) ),
     ) ] )
@@ -92,7 +96,7 @@ class IbHomeVmBuild( object ) :
 
     def __setattr__( self, name, value ) :
         if name.startswith('_'):
-            super(IbHomeVmBuild, self).__setattr__(name, value)
+            super(IbHomeVmArchive, self).__setattr__(name, value)
             return
         elif name not in self._item_names :
             raise IbHomeVmDataError( 'Attempt to set invalid attribute "{0}"'.format(name) )
@@ -154,7 +158,7 @@ class IbHomeVmBuild( object ) :
             if rec.Name == name :
                 return rec
         else :
-            raise IbHomeVmException( 'No archive named: "{0}"'.format(name) )
+            raise( 'No archive named: "{0}"'.format(name) )
 
     def Validate( self ) :
         for name,item in self._item_names.items() :
@@ -209,25 +213,27 @@ class IbHomeVmBuild( object ) :
         return str(self._items)
 
 
-class IbHomeVmBuildSet( object ) :
-    def __init__( self, builds_dir ) :
-        self._builds_dir = builds_dir
-        self._builds = [ ]
+class IbHomeVmArchiveSet( object ) :
+    def __init__( self, archives_dir ) :
+        self._archives_dir = archives_dir
+        self._archives = [ ]
+    ArchivesDir = property( lambda self : self._archives_dir )
 
     def ReadAll( self ) :
-        for name in os.listdir( self._builds_dir ) :
-            vm = IbHomeVmBuild.CreateFromFile( os.path.join(self._builds_dir, name) )
+        for name in os.listdir( self._archives_dir ) :
+            vm = IbHomeVmArchive.CreateFromFile( os.path.join(self._archives_dir, name) )
             if vm is not None :
-                self._builds.append( vm )
+                self._archives.append( vm )
 
-    def Builds( self, filter=None ) :
-        for build in self._builds :
-            if filter is None or filter(build) :
-                yield build
+    def Archives( self, filter=None ) :
+        for archive in self._archives :
+            if filter is None or filter(archive) :
+                yield archive
         return
 
+
 if __name__ == "__main__" :
-    data = IbHomeVmBuild( )
+    data = IbHomeVmArchive( )
     try :
         data.foo = 'abc'
         assert False

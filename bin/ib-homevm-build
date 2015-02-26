@@ -25,13 +25,14 @@ import time
 import glob
 import shlex
 import tarfile
+import tempfile
 import git
 import functools
 
 from ib.util.version import *
 from ib.util.version_reader import *
 from ib.homevm.exceptions import *
-from ib.homevm.build import *
+from ib.homevm.archive import *
 from ib.homevm.config import *
 from ib.homevm.parser import *
 
@@ -57,6 +58,10 @@ class _Parser( IbHomeVmParser ) :
                                   action="store", dest="gcc_version", default=None,
                                   help="Specify GCC version to use <auto>" )
 
+        self.Parser.add_argument( "--clang-version",
+                                  action="store", dest="clang_version", default=None,
+                                  help="Specify and use LLVM-clang version to use <auto>" )
+
         self.Parser.add_argument( "--ats-version",
                                   action="store", dest="ats_version", default=None,
                                   help="Specify ATS version to use <auto>" )
@@ -64,6 +69,14 @@ class _Parser( IbHomeVmParser ) :
         self.Parser.add_argument( "--ib-build-dir",
                                   action="store", dest="ib_build", default='.',
                                   help="Specify IronBee build directory <.>" )
+
+        self.Parser.set_defaults( clean_tmp=True )
+        self.Parser.add_argument( "--clean-tmp",
+                                  action="store_true", dest="clean_tmp",
+                                  help="Cleanup temporary directory(s) (default=yes)" )
+        self.Parser.add_argument( "--no-clean-tmp",
+                                  action="store_false", dest="clean_tmp",
+                                  help="Don't cleanup temporary directory(s)" )
 
         self.Parser.set_defaults( clean=False )
         self.Parser.add_argument( "--clean", "-c",
@@ -132,6 +145,21 @@ class _Main( object ) :
         except OSError as e :
             raise DetectionError("Unable to detect gcc version:"+str(e))
 
+    def _DetectClangVersion( self ) :
+        if self._args.clang_version is not None :
+            return self._args.clang_version
+        elif 'CLANG_VERSION' in os.environ :
+            return os.environ['CLANG_VERSION']
+        cmd = ( 'clang', '--version' )
+        output = subprocess.check_output( cmd )
+        try :
+            match = re.search( r' (\d+\.\d+)\.\d+', output )
+            if match is None :
+                raise DetectionError("Unable to detect clang version!")
+            return match.group(1)
+        except OSError as e :
+            raise DetectionError("Unable to detect clang version:"+str(e))
+
     def _DetectAtsVersion( self ) :
         if self._args.ats_version is not None :
             return self._args.ats_version
@@ -171,10 +199,13 @@ class _Main( object ) :
 
     def _DetectStuff( self ) :
         try :
-            self._vm = IbHomeVmBuild( )
+            self._vm = IbHomeVmArchive( )
             self._vm.Architecture = self._args.arch
             self._vm.Bits = self._args.bits
             self._vm.GccVersion = self._DetectGccVersion( )
+            self._vm.ClangVersion = self._DetectClangVersion( )
+            self._vm.ClangThreadSanitizer = os.environ.get('CLANG_TSAN','False') == 'True'
+            self._vm.Compiler = os.environ.get('COMPILER', 'gcc')
             self._vm.AtsVersion = self._DetectAtsVersion( )
             self._vm.IronBeeVersion = self._DetectIronBeeVersion( )
             self._vm.BuildConfig = self._ReadBuildConfig( )
@@ -191,7 +222,7 @@ class _Main( object ) :
             self._archive_dir = self._vm.GetPath( self._args.archives )
             self._ts_name = 'trafficserver-'+self._vm.AtsVersion
             if not self.Quiet :
-                print 'Archives will be stored in "'+self._archive_dir
+                print 'Archives will be stored in "{}"'.format(self._archive_dir)
         except DetectionError as e:
             print >>sys.stderr, "Auto detection failed: ", e
             sys.exit(1)
@@ -244,25 +275,21 @@ class _Main( object ) :
                 ignore_list.append(name)
         return ignore_list
 
-    def _CreateBuildArchive( self ) :
-        tpath = os.path.join(self._archive_dir, 'build.tar.bz2')
-        if not self.Quiet :
-            print 'Creating build tarball', tpath
-        tball = tarfile.TarFile.open( tpath, 'w:bz2' )
-        os.chdir( self._args.build_root )
-        tball.add( 'gcc',
-                   filter=functools.partial(self._ArchiveFilter, []) )
-        tball.add( os.environ.get('IB_BUILD','gcc-'+self._vm.GccVersion)+'/install',
-                   filter=functools.partial(self._ArchiveFilter, []) )
-        tball.close( )
-        self._vm.AddArchive( 'build', 'build.tar.bz2', self._args.build_root )
-
-    def _CreateLocalArchive( self ) :
+    def _CreateLocalArchive( self, tmproot ) :
+        if self._vm.Compiler == 'gcc' :
+            compiler = 'gcc-'+self._vm.GccVersion
+        elif self._vm.Compiler == 'clang' :
+            compiler = 'clang-'+self._vm.ClangVersion
+        else :
+            assert False, 'Unknown compiler "{}"'.format(self._vm.Compiler)
         ignore_ats = self._ts_name.replace('.', '\.')
         ignore_rules = (
             # ignore?, pattern ..  First match wins
             (True,  re.compile(r'.*\.sock')),
             (True,  re.compile(r'tmp/.*')),
+            (False, re.compile(compiler)),
+            (True,  re.compile(r'gcc-*')),
+            (True,  re.compile(r'clang-*')),
             (True,  re.compile(r'opt/'+ignore_ats+'/(etc|var|tmp)/*')),
             (False, re.compile(r'opt/'+ignore_ats+'/(bin|include|lib|share)')),
             (False, re.compile(r'opt/'+ignore_ats+'/?$')),
@@ -280,15 +307,14 @@ class _Main( object ) :
             (True,  re.compile(r'crashes')),
         )
 
-        tmpdir = os.path.join(os.environ['QLYS_TMP'], 'qualys')
+        tmpdir = os.path.join(tmproot, 'local')
         local = os.environ['QLYS_LOCAL']
         print 'Populating tmp local tree "'+tmpdir+'" from "'+local+'" ...'
         if self.Execute :
-            if os.path.exists( tmpdir ) :
-                shutil.rmtree( tmpdir )
             shutil.copytree( local, tmpdir,
                              ignore=functools.partial(self._CopyIgnore, ignore_rules) )
             dirs = (
+                (compiler,),
                 ('var', 'run'),
                 ('var', 'log', 'trafficserver'),
                 ('var', 'log', 'trafficserver'),
@@ -308,15 +334,16 @@ class _Main( object ) :
 
         tpath = os.path.join(self._archive_dir, 'local.tar.bz2')
         if not self.Quiet :
-            print 'Creating build tarball', tpath
+            print 'Creating local tarball', tpath
         tball = tarfile.TarFile.open( tpath, 'w:bz2' )
         os.chdir( tmpdir )
-        for d in ( 'bin', 'opt', 'share', 'tmp', 'var' ) :
+        for d in ( compiler, 'bin', 'opt', 'share', 'tmp', 'var' ) :
             tball.add( d, filter=functools.partial(self._ArchiveFilter, []) )
         tball.close( )
+
         self._vm.AddArchive( 'local', 'local.tar.bz2', local )
 
-    def _CreateEtcArchive( self ) :
+    def _CreateEtcArchive( self, tmproot ) :
         archive_rules = (
             (False, re.compile(r'trafficserver/release')),
             (False, re.compile(r'/trafficserver/')),
@@ -328,7 +355,7 @@ class _Main( object ) :
         )
         tpath = os.path.join(self._archive_dir, 'etc.in.tar.bz2')
         if not self.Quiet :
-            print 'Creating build tarball', tpath
+            print 'Creating etc tarball', tpath
         tball = tarfile.TarFile.open( tpath, 'w:bz2' )
         os.chdir( os.environ['QLYS_DEVEL'] )
         tball.add( 'etc.in',
@@ -337,16 +364,20 @@ class _Main( object ) :
         self._vm.AddArchive( 'etc-in', 'etc.in.tar.bz2', os.environ['QLYS_LOCAL'] )
 
     def _CreateSummary( self ) :
-        self._vm.WriteArchiveData( self._args. )
+        self._vm.WriteArchiveData( self._args.archives )
 
     def _CreateArchives( self ) :
         self._archives = [ ]
         if self.Execute :
             os.makedirs( self._archive_dir )
-        self._CreateBuildArchive( )
-        self._CreateEtcArchive( )
-        self._CreateLocalArchive( )
+            tmpdir = tempfile.mkdtemp( dir=os.environ['QLYS_TMP'] )
+        self._CreateEtcArchive( tmpdir )
+        self._CreateLocalArchive( tmpdir )
         self._CreateSummary( )
+        if self.Execute and self._args.clean_tmp :
+            shutil.rmtree( tmpdir )
+        elif self.Execute :
+            print 'Temporary directory "{}" not removed'.format(tmpdir)
 
     Execute = property( lambda self : self._args.execute )
     Verbose = property( lambda self : self._args.verbose )

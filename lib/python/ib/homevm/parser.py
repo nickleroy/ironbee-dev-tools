@@ -18,7 +18,7 @@
 import os
 import argparse
 from ib.util.parser  import *
-from ib.homevm.build import *
+from ib.homevm.archive import *
 
 class IbHomeVmParser( IbBaseParser ) :
     def __init__( self, description ) :
@@ -26,7 +26,7 @@ class IbHomeVmParser( IbBaseParser ) :
 
         class TimeAction( argparse.Action ) :
             def __call__( self, parser, namespace, values, option_string=None ) :
-                namespace.timestamp = IbHomeVmBuild.FormatTime( values )
+                namespace.timestamp = IbHomeVmArchive.FormatTime( values )
         self.Parser.set_defaults( timestamp=None )
         self.Parser.add_argument( "--timestamp",
                                   action=TimeAction,
@@ -46,7 +46,7 @@ class IbHomeVmParser( IbBaseParser ) :
                                           action="store", dest="build_root", default=build_root,
                                           help="Specify alternate directory <"+build_root+">" )
 
-        archives = os.environ['QLYS_ARCHIVES']
+        archives = os.environ['IB_BLD_ARCHIVES']
         self.Parser.add_argument( "--archives",
                                   action="store", dest="archives", default=archives,
                                   help="Specify archives directory <"+archives+">" )

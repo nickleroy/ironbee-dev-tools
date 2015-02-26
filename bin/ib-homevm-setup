@@ -165,20 +165,13 @@ class _Main( object ) :
             cmd = ( 'rsync', '-av', 'celeborn:'+src, dest )
             self._Execute( cmd )
 
-    def _SetupBuildDirs( self ) :
-        # Create and mount /build
-        print "Creating /build"
-        paths = ( "/build", "/local/build", '/local/build/qualys', '/local/qualys' )
+    def _SetupLocalDirs( self ) :
+        paths = ( '/local/qualys', )
         for path in paths :
             if not os.path.exists( path ) :
                 os.makedirs( path )
             if path.endswith( '/qualys' ) :
                 self._user.ChownDir( path )
-        if not self._SearchFile( "/etc/fstab", "/build" ) :
-            self._AppendFile( "/etc/fstab", "/local/build       /build    none    bind    0 0" )
-        if not self._SearchFile( "/proc/mounts", "/build" ) :
-            cmd = [ "/bin/mount", "/build" ]
-            self._Execute( cmd )
 
     Execute = property( lambda self : self._args.execute )
     Verbose = property( lambda self : self._args.verbose )
@@ -192,7 +185,7 @@ class _Main( object ) :
         self._RunYast( )
         self._SetupSwap( )
         self._SetupHomes( )
-        self._SetupBuildDirs( )
+        self._SetupLocalDirs( )
 
 main = _Main( )
 main.Main( )
