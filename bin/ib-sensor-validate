@@ -1,0 +1,234 @@
+#! /usr/bin/env python
+# ****************************************************************************
+# Licensed to Qualys, Inc. (QUALYS) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# QUALYS licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ****************************************************************************
+import re
+import os
+import sys
+import time
+import argparse
+import subprocess
+from ib.util.parser import *
+
+class VersionError( BaseException ) : pass
+
+class Parser( IbBaseParser ) :
+    def __init__( self, main ) :
+        IbBaseParser.__init__( self, main.Description,
+                               formatter_class=argparse.RawDescriptionHelpFormatter,
+                               epilog=\
+'''
+Examples:
+   ib-sensor-validate /qyls/rc/waf-sensor/WAF-SENSOR-1.1.0-24/
+   ib-sensor-validate ./version-1.1.0-24.txt
+   ib-sensor-validate 1.1.0-24
+'''
+)
+
+        self.Parser.add_argument( '--root', '-r',
+                                  dest='root', default='/',
+                                  help='Root directory (default = "/")' )
+        self.Parser.add_argument( '--qualys-root', '-qr',
+                                  dest='qualys', default=None,
+                                  help='Root directory of Qualys (default = "root+opt/qualys")' )
+
+        self.Parser.set_defaults( versions={} )
+        class VersionAction(argparse.Action):
+            _main = None
+            @classmethod
+            def _InitVersionAction( cls, main ) :
+                cls._main = main
+            def __call__(self, parser, namespace, values, option_string=None):
+                if type(values) == str :
+                    values = [values]
+                for n,value in enumerate(values) :
+                    try :
+                        if n == 0 :
+                            versions = main.ParseSensorVersionArg(value)
+                            for name,value in versions.items() :
+                                namespace.versions[name] = value
+                        else :
+                            name, value = main.ParsePackageVersionArg(value)
+                            namespace.versions[name] = value
+                    except VersionError as e :
+                        parser.error( str(e) )
+        self.Parser.add_argument( 'sensor-version', action=VersionAction,
+                                  help='Specify version of sensor' )
+        self.Parser.add_argument( 'package-version', action=VersionAction, nargs='*',
+                                  help='Specify version of individual packages' )
+        VersionAction._InitVersionAction( main )
+
+
+class Main( object ) :
+    _patterns = {
+        'RPM'    : re.compile( r'([a-zA-Z][\w\-\.\+]+?)-(\d[\w\.\-]+?)'+
+                               r'(?:\.(?:x86_64|noarch|i\d86))?(?:\.rpm)?$' ),
+        'Other'  : re.compile( r'([a-zA-Z][\w\-\.]+?)[=:](\d[\w\.\-]+)$' ),
+    }
+    def __init__( self ) :
+        self._parser = Parser( self )
+        self._sensor_versions = None
+
+    def _Parse( self ) :
+        self._args = self._parser.Parse()
+        versions = self._args.versions
+        if '__SENSOR__' not in versions :
+            self._parser.Error( 'No sensor version specified' )
+        self._sensor_versions = versions
+
+    _path_regex = re.compile( r'-(\d[\w\.\-]+?)(?:\.(?:x86_64|noarch|i\d86))?(?:\.rpm)?(?:\/*)$' )
+    def _ParseVersionPath( self, s ) :
+        match = self._path_regex.search( s )
+        return None if match is None else match.group(1)
+
+    def _ImportVersionFile( self, fp ) :
+        versions = {'__SENSOR__' : self._ParseVersionPath(fp.name) }
+        for line in fp :
+            if len(line) <= 1 or line.startswith('#'):
+                continue
+            try :
+                name,ver = self._ParseVersionString( line.rstrip() )
+                versions[name] = ver
+            except VersionError :
+                break
+        return versions
+
+    def _ImportReleaseDir( self, path ) :
+        versions = {'__SENSOR__' : self._ParseVersionPath(path) }
+        for name in os.listdir(path) :
+            name, ver = self._ParseVersionString( name )
+            versions[name] = ver
+        return versions
+
+    def _ParseVersionString( self, s ) :
+        for pname, regex in self._patterns.items( ) :
+            match = regex.match( s )
+            if match is not None :
+                return match.groups()
+        else :
+            raise VersionError( 'Failed to parse name/version "{}"'.format(s) )
+
+    def ParseSensorVersionArg( self, s ) :
+        if os.path.isfile( s ) :
+            try :
+                return self._ImportVersionFile( open(s) )
+            except IOError as e :
+                self._parser.Error(
+                    'Unable to open WAF sensor version file "{}"'.format(s)
+                )
+        elif os.path.isdir( s ) :
+            return self._ImportReleaseDir( s )
+        else :
+            etc = os.path.abspath( os.path.abspath(os.path.dirname(sys.argv[0]))+'/../etc' )
+            path = os.path.join(etc, 'sensors', 'sensor-{}.txt'.format(s) )
+            if not os.path.isfile( path ) :
+                self._parser.Error(
+                    'Unable to find WAF sensor version file for version "{}"'.format(s)
+                )
+            return self._ImportVersionFile( path )
+
+    def ParsePackageVersionArg( self, s ) :
+        return self._ParseVersionString( s )
+
+    def MergeVersionDicts( self, to_versions, from_versions, over=False ) :
+        for name,ver in from_versions.items() :
+            if name not in to_versions or over :
+                to_versions[name] = ver
+
+    def _ReadSystemFile( self ) :
+        path = os.path.join( self._args.root, 'system-stats.txt' )
+        if not os.path.isfile( path ) :
+            print >>sys.stderr, 'Version file "{}" does not exist'.format(path)
+            sys.exit( 1 )
+        versions = {}
+        try :
+            fp = open(path)
+        except OSError as e :
+            print >>sys.stderr, 'Can\'t read version file "{}": {}'.format(path, e)
+            sys.exit( 1 )
+        for line in fp :
+            if 'rpm -qa' in line :
+                break
+        versions = self._ImportVersionFile( fp )
+        if len(versions) == 0 :
+            print >>sys.stderr, 'No RPM versions found in "{}"'.format(path)
+            sys.exit( 1 )
+        return versions
+
+
+    def _QueryRpm( self ) :
+        cmd = ( '/bin/rpm', '-qa' )
+        versions = { }
+        try :
+            for line in subprocess.check_output(cmd).splitlines() :
+                try :
+                    version = self._ParseVersionString( line )
+                except VersionError :
+                    print >>sys.stderr, 'Error parsing RPM output "{}"'.format( line )
+                    sys.exit( 1 )
+            return versions
+        except (OSError, subprocess.CalledProcessError) as e :
+            print >>sys.stderr, 'Failed to run "{}": {}'.format( ' '.join(cmd), e )
+            sys.exit( 1 )
+
+    def _RunRpmCheck( self ) :
+        ignore = {
+            '__SENSOR__' : str.__eq__,
+            '-devel' : str.endswith,
+            '-debuginfo' : str.endswith,
+            'facter' : str.__eq__,
+            'ironbee-util' : str.__eq__,
+        }
+        if self._args.root != '/' :
+            versions = self._ReadSystemFile( )
+        else :
+            versions = self._QueryRpm( )
+        errors = []
+        for name,value in self._sensor_versions.items( ) :
+            if name not in versions :
+                for arg,fn in ignore.items() :
+                    if fn( name, arg ) :
+                        break
+                else :
+                    errors.append( 'Package "{}" not installed'.format(name) )
+            elif versions[name] is not None and versions[name] != value :
+                errors.append( 'Package "{}" expected version {}, found {}'. \
+                               format(name, value, versions[name]) )
+        return errors
+
+    def _RunChecks( self ) :
+        errors = self._RunRpmCheck( )
+        if len( errors ) :
+            for e in errors :
+                print e
+            sys.exit(1)
+
+    def Main( self ) :
+        self._Parse( )
+        self._RunChecks( )
+
+    Description = property( lambda self : 'Tool to validate an RNS Sensor (IronBee)' )
+
+
+main = Main( )
+main.Main( )
+
+### Local Variables: ***
+### py-indent-offset:4 ***
+### python-indent:4 ***
+### python-continuation-offset:4 ***
+### tab-width:4  ***
+### End: ***
