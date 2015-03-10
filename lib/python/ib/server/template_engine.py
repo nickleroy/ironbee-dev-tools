@@ -96,7 +96,7 @@ class _RelativeEnvironment(jinja2.Environment):
 
 class IbServerTemplateEngine( object ) :
     def __init__( self, defs, src_root, dst_root ) :
-        assert src_root != dst_root
+        assert src_root != dst_root, 'src_root="{}" == dst_root="{}"'.format(src_root, dst_root)
         paths = [ src_root ]
         self._defs = defs
         self._src_root = src_root

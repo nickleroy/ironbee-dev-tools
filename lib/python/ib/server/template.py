@@ -68,11 +68,16 @@ class IbServerTemplate( object ) :
             return
         tvars = dict()
         for key, value in self._engine.Defs.KeyValues( ) :
-            self._MergeIn( tvars, key, value )
+            if '.' not in key :
+                self._MergeIn( tvars, key, value )
         for key, value in generator.SiteOptions.items( ) :
             self._MergeIn( tvars, 'Opts.'+key, value )
         for key, value in generator.LocalOptions.items( ) :
+            print key, value
             self._MergeIn( tvars, 'Opts.'+key, value )
+        for key, value in self._engine.Defs.KeyValues( ) :
+            if '.' in key :
+                self._MergeIn( tvars, 'Opts.'+key, value )
         m = self._num_regex.search( self._in )
         if m is not None :
             tvars['FileNum'] = int(m.group(1))

@@ -56,6 +56,9 @@ from ib.server.tool.valgrind import *
 class _ServerParser( IbBaseParser ) :
     def __init__( self, main ) :
         IbBaseParser.__init__( self, "Run "+main.ServerNameFull+" with IronBee" )
+        self.Parser.add_argument( "--confirm",
+                                  action="store_true", dest="confirm", default=False,
+                                  help='Confirm before starting {}'.format(main.ServerName) )
 
         group = self.Parser.add_argument_group( )
         group.add_argument( "sites", type=str, nargs='+', default=[],
@@ -79,26 +82,18 @@ class _ServerParser( IbBaseParser ) :
         self.Parser.add_argument( "--core", action=CoreAction, nargs=1,
                                   help="Specify core file or \"-\" for last" )
 
-        tools = self.Parser.add_argument_group( 'Tools', 'Tool-related options' )
-        tool_group = tools.add_mutually_exclusive_group( )
-        tool_group.add_argument( "--default",
-                                 action="store_const", dest="tool", default="none",
-                                 const="none",
-                                 help="Run {:1} natively".format(main.ServerName) )
-        for name in main.Tools.keys() :
-            tool_group.add_argument( "--"+name,
-                                     action="store_const", dest="tool", const=name,
-                                     help="Run {:1} under {:2}".format(main.ServerName, name) )
-
+        group = self.Parser.add_argument_group( )
+        group.add_argument( '--tool', default='none', dest='tool', choices=main.Tools.keys(),
+                            help="Run {:1} under specified tool".format(main.ServerName) )
         self.Parser.set_defaults( tool_args=[] )
         class ToolArgsAction(argparse.Action):
             def __call__(self, parser, namespace, values, option_string=None):
                 for v in values :
                     namespace.tool_args += v.split(',')
-        tools.add_argument( "--tool-args",
+        group.add_argument( "--tool-args",
                             action=ToolArgsAction, dest="tool_args", nargs=1,
                             help="Specify list of tool-specific arguments (comma separated)")
-        tools.add_argument( "--tool-arg",
+        group.add_argument( "--tool-arg",
                             action="append", dest="tool_args",
                             help="Specify single tool-specific argument")
 
@@ -106,7 +101,7 @@ class _ServerParser( IbBaseParser ) :
         class IbAction(argparse.Action):
             def __call__(self, parser, namespace, values, option_string=None):
                 if option_string == "--ib-config" :
-                    namespace.defs['IbEtc'] = None
+                    namespace.defs['IbEtcIn'] = None
                     namespace.defs['IbConfig'] = values[0]
                 elif len(values) == 0 :
                     namespace.defs['IbEtcIn'] = main.Defs.Lookup("RnsEtcIn")
@@ -151,7 +146,7 @@ class _ServerParser( IbBaseParser ) :
 
         self.Parser.add_argument( "--clear-logs", "-c",
                                    action="store_true", dest="clear_logs", default=False,
-                                   help="Clear log files before starting %s" % (main.ServerName) )
+                                   help="Clear log files before starting {}".format(main.ServerName) )
 
         group = self.Parser.add_argument_group( )
         group.add_argument( "--out", "-o",
@@ -162,6 +157,10 @@ class _ServerParser( IbBaseParser ) :
                             const="${DefaultOut}",
                             help="Use default stdout file" )
 
+        group = self.Parser.add_argument_group( )
+        group.add_argument( "--log", "-l",
+                            action="store", dest="logfile", default=None, type=argparse.FileType('a'),
+                            help='Log activity to file')
         group.add_argument( "--tmp",
                             action="store_true", dest="tmp", default=False,
                             help='Change to $QLYS_TMP directory before starting')
@@ -176,6 +175,7 @@ class _ServerParser( IbBaseParser ) :
         group.add_argument( "--disable-post", "--no-post",
                             action="store_false", dest="postcmds", default=True,
                             help="Disable running of post-commands")
+
 
         class EnableAction( argparse.Action ) :
             def __call__(self, parser, namespace, values, option_string=None):
@@ -200,7 +200,7 @@ class _ServerParser( IbBaseParser ) :
         class IbEnableAction(argparse.Action):
             def __call__(self, parser, namespace, values, option_string=None):
                 if 'enable' in option_string :
-                    namespace.defs['IbEtc'] = '${EtcIn}/ironbee' # Restore default
+                    namespace.defs['IbEtc'] = '${Etc}/ironbee' # Restore default
                     namespace.defs['IbEnable'] = True
                     namespace.ib_enable = True
                 else :
@@ -367,6 +367,7 @@ class IbServerMain( object ) :
             "Cmd"              : [ "${Executable}", "${Args}" ],
             "IbInstall"        : os.environ["IB_INSTROOT"],
             "IbLibDir"         : os.environ["IB_LIBDIR"],
+            "IbLibExec"        : os.environ["IB_LIBEXEC"],
             "IbLogDir"         : "${BaseLogDir}/ironbee",
             "IbEtc"            : "${Etc}/ironbee",
             "IbEtcIn"          : "${EtcIn}/ironbee",
@@ -481,7 +482,7 @@ class IbServerMain( object ) :
                 self._defs.Set("Executable", p)
                 break
         else :
-            self.Parser.Error( "No %s binary found" % (self.ServerNameUpper) )
+            self.Parser.Error( "No {} binary found".format(self.ServerNameUpper) )
         
     def WipeConfigDir( self, name, pretty, node ) :
         path = self._defs.Lookup( name )
@@ -734,11 +735,18 @@ class IbServerMain( object ) :
             print "Running:", cmd
             if outfile is not None :
                 print "Output ->", outfile
+
+        if self._args.confirm :
+            answer = raw_input( 'Start "{}" (Y/n)? ' )
+            if answer.lower in ('no','n') :
+                return 0
         try :
             resource.setrlimit(resource.RLIMIT_CORE,
                                (resource.RLIM_INFINITY,resource.RLIM_INFINITY))
             if self._args.output is None  and  outfile is None :
                 status = subprocess.call( cmd )
+                if self._args.logfile is not None :
+                    print >>self._args.logfile, '  PID {} "{}" status {}'.format('?', cmd, status)
             else :
                 outfile = self._defs.ExpandStr( '.ib-${ServerNameLower}.${PID}.out' )
                 errfile = self._defs.ExpandStr( '.ib-${ServerNameLower}.${PID}.err' )
@@ -748,12 +756,15 @@ class IbServerMain( object ) :
                     out = open( outfile, "w+", 0 )
                 err = open( errfile, 'w', 0 )
                 p = subprocess.Popen( cmd, stdout=out, stderr=err )
+                pid = p.pid
                 if self._args.verbose :
                     print "Process is", p.pid
                 for line in out :
                     if out != sys.stdout  and  self._args.verbose >= 2 :
                         print line.strip()
                 status = p.wait()
+                if self._args.logfile is not None :
+                    print >>self._args.logfile, '  PID {} "{}" status {}'.format(pid, cmd, status)
         except KeyboardInterrupt:
             status = 0
         if status :
@@ -777,16 +788,20 @@ class IbServerMain( object ) :
     def Main( self ) :
         self._parser = _ServerParser( self )
         self._Parse( )
+        print self._args.tool
         self._PostParse( )
         self._PreMain( )
         self._DumpTable( )
         if self._args.tmp :
             os.chdir( self._defs.Lookup("Tmp") )
-
+        if self._args.logfile is not None :
+            print >>self._args.logfile, '-- Starting {} @ {} --'.format(os.getpid(), time.asctime())
+            print >>self._args.logfile, '  {}'.format(sys.argv)
         self._dags.Evaluate( )
         if self._args.verbose :
             self._dags.Dump( verbose=self._args.verbose - 1 )
         self._dags.Execute( verbose=self._args.verbose )
+
 
 class IbModule_server_main( object ) :
     modulePath = __file__
