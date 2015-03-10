@@ -46,6 +46,10 @@ IbServerToolValgrindTools = \
                                       defs={"SubTool":"helgrind"}),
     "drd" : IbServerToolValgrind("drd",
                                  defs={"SubTool":"drd"}),
+    "cachegrind" : IbServerToolValgrind("cachegrind",
+                                        defs={"SubTool":"cachegrind"}),
+    "callgrind" : IbServerToolValgrind("callgrind",
+                                       defs={"SubTool":"callgrind"}),
 }
 
 class IbModule_server_tool_valgrind( object ) :
