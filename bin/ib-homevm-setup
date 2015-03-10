@@ -25,7 +25,6 @@ import grp
 import glob
 import subprocess
 import argparse
-import platform
 import time
 import shutil
 import tarfile
