@@ -62,7 +62,7 @@ class SlowHttpHandler(urllib2.HTTPHandler):
 class _Parser( IbBaseParser ) :
     def __init__( self ) :
         IbBaseParser.__init__( self, 
-                               "Program do a large post" )
+                               "Program to POST a file" )
 
         class UrlAction(argparse.Action):
             def __call__(self, parser, namespace, values, option_string=None):
@@ -91,6 +91,13 @@ class _Parser( IbBaseParser ) :
                                   type=argparse.FileType('wb'),
                                   help='Store response to file' )
 
+        self.Parser.add_argument( "--throughput", '-t',
+                                  action='store_true', default=False,
+                                  help='Output throughput statistics' )
+        self.Parser.add_argument( "--units", '-u', choices=('GMK', 'gmk'), default='GMK',
+                                  help='Use GMK (base 10) or gmk (base 16) for throughput units' )
+
+
 class _Main( object ) :
     def __init__( self ) :
         self._parser = _Parser( )
@@ -103,6 +110,7 @@ class _Main( object ) :
         # actually accesses the file behind the scenes. 
         f = self._args.infile
         mmapped_file_as_string = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+        size = os.fstat(f.fileno()).st_size
 
         # Do the request
         request = urllib2.Request(self._args.url, mmapped_file_as_string)
@@ -111,7 +119,31 @@ class _Main( object ) :
         handler = SlowHttpHandler( )
         opener = urllib2.build_opener( handler )
         try :
+            start = time.time()
             response = opener.open( request )
+            finished = time.time()
+            if self._args.throughput :
+                rate = size / (finished - start)
+                ratetxt = None
+                if self._args.units == 'GMK' :
+                    if rate > 1.1e9 :
+                        ratetxt = '{:0.3f}Gbps'.format(rate/1.0e9)
+                    elif rate > 1.1e6 :
+                        ratetxt = '{:0.3f}Mbps'.format(rate/1.0e6)
+                    elif rate > 1.1e3 :
+                        ratetxt = '{:0.3f}Kbps'.format(rate/1.0e3)
+                    else :
+                        ratetxt = '{:0.3f}bps'.format(rate)
+                else :
+                    if rate > 1.1 * 1024*1024*1024 :
+                        ratetxt = '{:0.3f}gbps'.format(rate/(1024*1024*1024))
+                    elif rate > 1.1e6 :
+                        ratetxt = '{:0.3f}mbps'.format(rate/(1024*1024))
+                    elif rate > 1.1e3 :
+                        ratetxt = '{:0.3f}kbps'.format(rate/1024)
+                    else :
+                        ratetxt = '{:0.3f}bps'.format(rate)
+                print 'Sent {}b in {}s @ {}'.format(size, finished-start, ratetxt)
             data = response.read()
             if self._args.out is not None :
                 self._args.out.write( data )
