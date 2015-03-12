@@ -105,6 +105,26 @@ class _Main( object ) :
     def _ParseCmdLine( self ) :
         self._args = self._parser.Parse( )
 
+    def _FormatNum( self, value ) :
+        if self._args.units == 'GMK' :
+            if value > 1.1e9 :
+                return '{:8.3f}Gb'.format(value/1.0e9)
+            elif value > 1.1e6 :
+                return '{:8.3f}Mb'.format(value/1.0e6)
+            elif value > 1.1e3 :
+                return '{:8.3f}Kb'.format(value/1.0e3)
+            else :
+                return '{:8.3f}b'.format(value)
+        else :
+            if value > 1.1 * 1024*1024*1024 :
+                return '{:8.3f}gb'.format(value/(1024*1024*1024))
+            elif value > 1.1e6 :
+                return '{:8.3f}mb'.format(value/(1024*1024))
+            elif value > 1.1e3 :
+                return '{:8.3f}kb'.format(value/1024)
+            else :
+                return '{:8.3f}b'.format(value)
+
     def _Post( self ) :
         # Open the file as a memory mapped string. Looks like a string, but 
         # actually accesses the file behind the scenes. 
@@ -123,30 +143,15 @@ class _Main( object ) :
             response = opener.open( request )
             finished = time.time()
             if self._args.throughput :
+                sizetxt = self._FormatNum(size)
                 rate = size / (finished - start)
-                ratetxt = None
-                if self._args.units == 'GMK' :
-                    if rate > 1.1e9 :
-                        ratetxt = '{:0.3f}Gbps'.format(rate/1.0e9)
-                    elif rate > 1.1e6 :
-                        ratetxt = '{:0.3f}Mbps'.format(rate/1.0e6)
-                    elif rate > 1.1e3 :
-                        ratetxt = '{:0.3f}Kbps'.format(rate/1.0e3)
-                    else :
-                        ratetxt = '{:0.3f}bps'.format(rate)
-                else :
-                    if rate > 1.1 * 1024*1024*1024 :
-                        ratetxt = '{:0.3f}gbps'.format(rate/(1024*1024*1024))
-                    elif rate > 1.1e6 :
-                        ratetxt = '{:0.3f}mbps'.format(rate/(1024*1024))
-                    elif rate > 1.1e3 :
-                        ratetxt = '{:0.3f}kbps'.format(rate/1024)
-                    else :
-                        ratetxt = '{:0.3f}bps'.format(rate)
-                print 'Sent {}b in {}s @ {}'.format(size, finished-start, ratetxt)
+                ratetxt = self._FormatNum(rate)+'ps'
+                print 'Sent {} in {:7.4f}s @ {}'.format(sizetxt, finished-start, ratetxt)
             data = response.read()
             if self._args.out is not None :
                 self._args.out.write( data )
+            elif self._args.max == 0 :
+                pass
             elif all(ord(c) < 128 for c in data[:self._args.max]) :
                 print data[:self._args.max]
         except urllib2.HTTPError as e :
