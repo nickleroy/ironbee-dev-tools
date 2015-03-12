@@ -1,0 +1,162 @@
+#! /usr/bin/env python
+# ****************************************************************************
+# Licensed to Qualys, Inc. (QUALYS) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# QUALYS licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ****************************************************************************
+import os
+import sys
+import re
+import math
+import argparse
+
+def RoundValue( x, sig=4 ):
+    return round(x, sig-int(math.floor(math.log10(x)))-1)
+
+def Mean( values ) :
+    return math.fsum(values) / len(values)
+
+class _Stats( object ) :
+    def __init__( self, samples ) :
+        self._count = len(samples)
+        self._minval = min(samples)
+        self._maxval = max(samples)
+        mean = Mean( samples )
+        self._mean = mean
+        self._variance = Mean(map(lambda x : (x - mean)**2, samples))
+        self._stddev = math.sqrt(self._variance)
+        self._smean = self._stddev / mean
+    Count    = property( lambda self : self._count )
+    MinValue = property( lambda self : self._minval )
+    MaxValue = property( lambda self : self._maxval )
+    Mean     = property( lambda self : self._mean )
+    Variance = property( lambda self : self._variance )
+    StdDev   = property( lambda self : self._stddev )
+    StdMean  = property( lambda self : self._smean )
+
+
+class _Samples( object ) :
+    def __init__( self ) :
+        self._samples = []
+        self._sorted = None
+        self._stats = None
+
+    def AddSample( self, sample ) :
+        self._samples.append( sample )
+
+    def Calculate( self, min_samples, max_smean ) :
+        stats = _Stats( self._samples )
+        self._stats = stats
+        return stats
+
+    def CalcSubamples( self, min_samples, min_smean ) :
+        samples = self._samples
+        mean = self._stats.Mean
+        while len(self._samples) > min_samples :
+            sorted_samp = sorted( samples )
+            dmin = abs(mean - samples[0])
+            dmax = abs(samples[-1] - mean)
+            if dmin > dmax :
+                samples = samples[1:]
+            else :
+                samples = samples[:-1]
+            stats = _Stats( samples )
+            if stats.StdMean <= min_smean :
+                return stats
+        else :
+            return None
+
+    def GenStats( self, min_samples, max_smean ) :
+        stats = self.Calculate( min_samples, max_smean )
+        if stats is None :
+            stats = samples.CalcSubamples( min_count, max_smean )
+        return stats
+
+    Samples = property( lambda self : self._samples )
+    Count   = property( lambda self : len(self._samples) )
+    Stats   = property( lambda self : self._stats )
+
+
+class _Main( object ) :
+    def __init__( self ) :
+        parser = argparse.ArgumentParser( description="Program to parse throughput data" )
+
+	parser.add_argument( "infile", type=argparse.FileType('r'), help='Input file' )
+        self._parser = parser
+        self._samples = []
+
+    def _ParseCmdLine( self ) :
+        self._args = self._parser.parse_args( )
+
+    def _AnalyzeSamples( self ) :
+        if len(samples) == 0 :
+            return None
+
+        skip = False
+        minsamples = int(round(len(samples) * 0.80))
+        if len(self._samples) < minsamples :
+            skip = True
+        samples = self._samples
+        minval, maxval, mean, stddev, smean = None, None, None, None, None
+        while len(samples) >= minsamples :
+            minval, maxval, mean, stddev, smean = self._Stats( samples )
+            if smean < 0.1 :
+                break
+            samples = self._TossOutlier( mean, samples )
+        else :
+            skip = True
+        if skip :
+            print 'Ignoring {} values (smean={})'.format(len(self._samples), smean)
+        else :
+            print 'n={}, min={:.3f}, max={:.3f}, mean={:.3f} stdev={:.3f} smean={:.4f}'.format(
+                len(samples),
+                self._RoundValue(minval), self._RoundValue(maxval),
+                self._RoundValue(mean), stddev, smean )
+        self._samples = []
+
+    def _Main( self ) :
+        self._ParseCmdLine( )
+        mults = { 'G':1.0e9, 'M':1.0e6, 'K':1.0e3, 'B':1.0,
+                  'g':1024*1024*1024, 'm':1024*1024, 'k':1024, 'b':1.0, }
+        samples = _Samples( )
+        for n,line in enumerate(self._args.infile) :
+            if line.startswith( 'ZAP' ) :
+                zap = line.startswith('ZAP=yes')
+                max_smean = 0.15 if zap else 0.10
+                mult = 0.75 if zap else 0.80
+                min_count = int(round(samples.Count * mult))
+                stats = samples.GenStats( min_count, max_smean )
+                if stats is None :
+                    print 'Too much variance in {} samples'.format(samples.Count)
+                else :
+                    stats.Print( )
+                print '\n{} {}'.format(n, line.rstrip())
+            elif line.startswith( 'Sent' ) :
+                m = re.search( r'(\d+\.\d+)s.*?(\d+\.\d+)([GgMmKkBb])', line )
+                t = float(m.group(1))
+                if t >= 1.5 :
+                    value = float(m.group(2)) * mults[m.group(3)]
+                    samples.AddSample(value/1e6)
+        result = self._PrintSamples()
+
+if __name__ == "__main__" :
+    main = _Main( )
+    main._Main( )
+
+### Local Variables: ***
+### py-indent-offset:4 ***
+### python-indent:4 ***
+### python-continuation-offset:4 ***
+### tab-width:4  ***
+### End: ***
