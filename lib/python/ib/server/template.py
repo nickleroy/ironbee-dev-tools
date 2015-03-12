@@ -66,7 +66,7 @@ class IbServerTemplate( object ) :
             if self._engine.Verbose :
                 print 'Not generating "{:s}"'.format( self._out )
             return
-        tvars = dict()
+        tvars = { 'Opts':{} }
         for key, value in self._engine.Defs.KeyValues( ) :
             if '.' not in key :
                 self._MergeIn( tvars, key, value )
