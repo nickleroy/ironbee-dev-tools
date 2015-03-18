@@ -121,7 +121,7 @@ class IbHomeVmArchive( object ) :
         return self._items.get(name, default)
 
     # Vm time stamp format for strftime()
-    _TimeStampFormat = '%Y-%m-%d-%H:%M:%S'
+    _TimeStampFormat = '%Y.%m.%d.%H.%M.%S'
     @classmethod
     def FormatTime( cls, when ) :
         s1 = time.strftime( cls._TimeStampFormat, time.localtime(when) )
