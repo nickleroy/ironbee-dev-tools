@@ -218,6 +218,8 @@ class _Main( object ) :
                 self._DetectGitBranch( self._args.ib_branch, self._ib_root)
             (self._vm.EtcInGitBranch, self._vm.EtcInGitCommit) = \
                 self._DetectGitBranch( self._args.etc_branch, os.environ['QLYS_ETC_IN'] )
+            self._vm.EtcInRepo = os.environ['QLYS_ETC_IN']
+            self._vm.QualysLocal = os.environ['QLYS_LOCAL']
             self._vm.TimeStamp = self._args.timestamp
             self._archive_dir = self._vm.GetPath( self._args.archives )
             self._ts_name = 'trafficserver-'+self._vm.AtsVersion
@@ -343,26 +345,6 @@ class _Main( object ) :
 
         self._vm.AddArchive( 'local', 'local.tar.bz2', local )
 
-    def _CreateEtcArchive( self, tmproot ) :
-        archive_rules = (
-            (False, re.compile(r'trafficserver/release')),
-            (False, re.compile(r'/trafficserver/')),
-            (False, re.compile(r'/tmp')),
-            (False, re.compile(r'/nginx')),
-            (False, re.compile(r'/data')),
-            (False, re.compile(r'\/\.git')),
-            (False, re.compile(r'~$')),
-        )
-        tpath = os.path.join(self._archive_dir, 'etc.in.tar.bz2')
-        if not self.Quiet :
-            print 'Creating etc tarball', tpath
-        tball = tarfile.TarFile.open( tpath, 'w:bz2' )
-        os.chdir( os.environ['QLYS_DEVEL'] )
-        tball.add( 'etc.in',
-                   filter=functools.partial(self._ArchiveFilter, archive_rules) )
-        tball.close( )
-        self._vm.AddArchive( 'etc-in', 'etc.in.tar.bz2', os.environ['QLYS_LOCAL'] )
-
     def _CreateSummary( self ) :
         self._vm.WriteArchiveData( self._args.archives )
 
@@ -371,7 +353,6 @@ class _Main( object ) :
         if self.Execute :
             os.makedirs( self._archive_dir )
             tmpdir = tempfile.mkdtemp( dir=os.environ['QLYS_TMP'] )
-        self._CreateEtcArchive( tmpdir )
         self._CreateLocalArchive( tmpdir )
         self._CreateSummary( )
         if self.Execute and self._args.clean_tmp :

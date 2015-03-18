@@ -41,33 +41,34 @@ class _Parser( IbHomeVmParser ) :
         IbHomeVmParser.__init__( self, 
                                     "Program to install IronBee on a VM host" )
 
-        self.Parser.add_argument( dest="ib_branch", default=None,
-                                  help="Specify alternate IronBee git branch name <None>" )
+        group = self.Parser.add_argument_group( )
+        group.add_argument( dest="ib_branch", default=None,
+                            help="Specify alternate IronBee git branch name <None>" )
+        group.add_argument( action="store", dest="ib_version", default=None, nargs='?',
+                            help="Specify IronBee version to use <None>" )
 
-        self.Parser.add_argument( action="store", dest="ib_version", default=None, nargs='?',
-                                  help="Specify IronBee version to use <None>" )
+        group = self.Parser.add_argument_group( )
+        group.add_argument( "--user",
+                            action="store", dest="user", default=None,
+                            help='Specify user to setup <default=from config>' )
+        group.add_argument( "--group",
+                            action="store", dest="group", default=None,
+                            help='Specify group to setup <default=from config>' )
 
-        self.Parser.add_argument( "--user",
-                                  action="store", dest="user", default=None,
-                                  help='Specify user to setup <default=from config>' )
-
-        self.Parser.add_argument( "--group",
-                                  action="store", dest="group", default=None,
-                                  help='Specify group to setup <default=from config>' )
-
-        self.Parser.add_argument( "--gcc-version",
-                                  action="store", dest="gcc_version", default=None,
-                                  help="Specify GCC version to use <Auto>" )
-        self.Parser.add_argument( "--clang-version",
-                                  action="store", dest="clang_version", default=None,
-                                  help="Specify clang version to use <Auto>" )
-        self.Parser.add_argument( "--clang-tsan",
-                                  action="store_true", dest="clang_tsan", default=False,
-                                  help="Require clang thread santized version to use <Auto>" )
-        self.Parser.add_argument( "--compiler",
-                                  action="store", dest="compiler", default=None,
-                                  choices=('clang','gcc'),
-                                  help="Specify compiler to use <Auto>" )
+        group = self.Parser.add_argument_group( )
+        group.add_argument( "--gcc-version",
+                            action="store", dest="gcc_version", default=None,
+                            help="Specify GCC version to use <Auto>" )
+        group.add_argument( "--clang-version",
+                            action="store", dest="clang_version", default=None,
+                            help="Specify clang version to use <Auto>" )
+        group.add_argument( "--clang-tsan",
+                            action="store_true", dest="clang_tsan", default=False,
+                            help="Require clang thread santized version to use <Auto>" )
+        group.add_argument( "--compiler",
+                            action="store", dest="compiler", default=None,
+                            choices=('clang','gcc'),
+                            help="Specify compiler to use <Auto>" )
 
         self.Parser.add_argument( "--ats-version",
                                   action="store", dest="ats_version", default=None,
@@ -185,8 +186,7 @@ class _Main( object ) :
             sys.exit(1)
 
     def _ExtractTarballs( self, archive ) :
-        self._PopulateDirectory( archive, "local",  wipe=('opt', 'share', 'etc', 'etc.in') )
-        self._PopulateDirectory( archive, "etc-in", wipe=True )
+        self._PopulateDirectory( archive, "local",  wipe=('opt', 'share', 'etc') )
         etc = os.environ['QLYS_ETC']
         if self.Execute :
             if os.path.exists( etc ) :
@@ -262,6 +262,12 @@ class _Main( object ) :
             print "Selected", archive.Name
         return archive
 
+    def _CheckoutEtcIn( self, archive ) :
+        local = archive.QualysLocal
+        if not os.path.isdir( os.path.join(local, 'etc.in') ) :
+            cmd = ( 'git', 'clone', archive.EtcInRepo )
+            subprocess.call( cmd, cwd=local )
+
     Execute = property( lambda self : self._args.execute )
     Verbose = property( lambda self : self._args.verbose )
     Quiet   = property( lambda self : self._args.quiet )
@@ -275,6 +281,7 @@ class _Main( object ) :
             print >>sys.stderr, "No matching archives found!"
             sys.exit( 1 )
         self._ExtractTarballs( archive )
+        self._CheckoutEtcIn( archive )
 
 main = _Main( )
 main.Main( )

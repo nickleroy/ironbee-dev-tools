@@ -57,6 +57,7 @@ class IbHomeVmArchive( object ) :
         _DataItem( 'ArchiveDirectory',      True,  str ),
         _DataItem( 'Name',                  True,  str ),
         _DataItem( 'TimeStamp',             True,  float ),
+        _DataItem( 'QualysLocal',           True,  str ),
         _DataItem( 'IronBeeVersion',        True,  IbVersion ),
         _DataItem( 'IronBeeGitBranch',      True,  str ),
         _DataItem( 'IronBeeGitCommit',      False, str,
@@ -66,6 +67,7 @@ class IbHomeVmArchive( object ) :
         _DataItem( 'EtcInGitBranch',        True,  str ),
         _DataItem( 'EtcInGitCommit',        False, str,
                    lambda cls,value : cls._commit_re.match(value) ),
+        _DataItem( 'EtcInRepo',             False, str ),
         _DataItem( 'BuildConfig',           False, str,
                    lambda cls,value : value is None or cls._config_re.match(value) ),
         _DataItem( 'Compiler',              True,  str ),
@@ -221,7 +223,10 @@ class IbHomeVmArchiveSet( object ) :
 
     def ReadAll( self ) :
         for name in os.listdir( self._archives_dir ) :
-            vm = IbHomeVmArchive.CreateFromFile( os.path.join(self._archives_dir, name) )
+            full = os.path.join(self._archives_dir, name)
+            if not os.path.isdir( full ) :
+                continue
+            vm = IbHomeVmArchive.CreateFromFile( full )
             if vm is not None :
                 self._archives.append( vm )
 

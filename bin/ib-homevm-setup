@@ -154,14 +154,17 @@ class _Main( object ) :
         cmd = ( 'swapon', '-a' )
         self._Execute( cmd )
 
-    _template_dirs = {
-        'home' : '/local',
-        'root' : '/',
-    }
-    def _SetupHomes( self ) :
-        for name, dest in self._template_dirs.items() :
+
+    def _ImportTemplates( self ) :
+        templdir  = '/home/qualys/template'
+        templfile = os.path.join(templdir, 'templates.txt')
+        for line in open(templfile) :
+            line = line.rstrip()
+            if len(line) == 0 or line.startswith('#') :
+                continue
+            name, dest = line.split(':')
             src = os.path.join( '/home/qualys/template', name )
-            cmd = ( 'rsync', '-av', 'celeborn:'+src, dest )
+            cmd = ( 'rsync', '-av', 'root@celeborn:'+src, dest )
             self._Execute( cmd )
 
     def _SetupLocalDirs( self ) :
@@ -183,7 +186,7 @@ class _Main( object ) :
             sys.exit( 1 )
         self._RunYast( )
         self._SetupSwap( )
-        self._SetupHomes( )
+        self._ImportTemplates( )
         self._SetupLocalDirs( )
 
 main = _Main( )
