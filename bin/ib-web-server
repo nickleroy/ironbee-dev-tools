@@ -23,6 +23,7 @@ import time
 import stat
 import urlparse
 import random
+import logging
 from BaseHTTPServer import HTTPServer,BaseHTTPRequestHandler
 
 from ib.util.parser import *
@@ -40,39 +41,28 @@ class _Parser( IbBaseParser ) :
                                   default=open('/usr/share/dict/words','r'),
                                   help='Specify dictionary file')
 
-        class CountAction(argparse.Action):
-            __mults = { 'k':1024, 'K':1000,
-                        'm':1024*1024, 'M':1000*1000,
-                        'g':1024*1024*1024, 'G':1000*1000*1000, }
-            __keys = tuple(__mults.keys())
-            def __call__(self, parser, namespace, param, option_string=None):
-                strval = param
-                mult = 1
-                if strval.endswith( self.__keys ) :
-                    mult = self.__mults[strval[-1]]
-                    strval = strval[:-1]
-                try :
-                    value = int(strval) * mult
-                    if option_string in ( '--lines', '-l' ) :
-                        namespace.lines  = value
-                    elif option_string in ( '--size', '-s' ) :
-                        namespace.size  = value
-                    elif option_string in ( '--linesize', '-ls' ) :
-                        namespace.linesize  = value
-                except ValueError :
-                    parser.error( "Invalid value '"+strval+"'" )
         self.Parser.set_defaults( lines=None )
         self.Parser.add_argument( "--lines", '-l',
-                                  action=CountAction,
+                                  action=self.MakeSizeAction('lines'),
                                   help="Specify number of lines" )
         self.Parser.set_defaults( size=None )
         self.Parser.add_argument( "--size", '-s',
-                                  action=CountAction,
+                                  action=self.MakeSizeAction('size'),
                                   help="Specify size of file" )
         self.Parser.set_defaults( linesize=None )
         self.Parser.add_argument( "--linesize", '-ls',
-                                  action=CountAction,
+                                  action=self.MakeSizeAction('linesize'),
                                   help="Specify max line size" )
+        self.Parser.add_argument( '--fixed', default=None, action="store",
+                                  help='Specify fixed response' )
+
+        self.Parser.set_defaults( time=None )
+        self.Parser.add_argument( "--time", '-t',
+                                  action="store_true", dest="time",
+                                  help="Add time to response" )
+        self.Parser.add_argument( "--no-time", '-T',
+                                  action="store_false", dest="time",
+                                  help="Don't add time to response" )
 
         self.Parser.add_argument( "--join", '-j',
                                   action="store", dest="join", default=None,
@@ -88,9 +78,9 @@ class _Parser( IbBaseParser ) :
 
 
 class Handler(BaseHTTPRequestHandler):
+    _start = time.time()
+
     def GenerateTextResponse( self ) :
-        assert _words is not None
-        assert _args is not None
         nlines = 0
         maxlines = _args.lines
         size = 0
@@ -98,26 +88,38 @@ class Handler(BaseHTTPRequestHandler):
         maxline = 1 if _args.linesize is None else _args.linesize
         join = '' if _args.join is None else _args.join
 
-        start = time.time()
         while ( maxlines is None or nlines < maxlines ) and ( maxsize is None or size < maxsize ) :
-            now = time.time()
-            line = "{:08d}/{:08.2f}:".format(size, now-start)
+            if _args.time :
+                now = time.time()
+                line = "{:08d}/{:08.2f}:".format(size, now-self._start)
+            else :
+                line = ''
             while len(line) < maxline :
                 line += join + random.choice(_words)
             line += '\r\n'
             size += len(line)
             yield line
             nlines += 1
+
     
     def do_GET(self):
         parsed_path = urlparse.urlparse(self.path)
         self.send_response(200)
         self.end_headers()
-        for line in self.GenerateTextResponse( ) :
-            self.wfile.write(line)
-            if _args.sleep is not None :
-                time.sleep(_args.sleep)
+        if _args.fixed is not None :
+            self.wfile.write( _args.fixed )
+        else :
+            for line in self.GenerateTextResponse( ) :
+                self.wfile.write(line)
+                if _args.sleep is not None :
+                    time.sleep(_args.sleep)
         return
+
+    def do_POST(self):
+        length = int(self.headers['Content-Length'])
+        post_data = self.rfile.read(length)
+        self.send_response(200)
+        self.end_headers()
 
 class _Main( object ) :
     def __init__( self ) :
@@ -138,13 +140,14 @@ class _Main( object ) :
         _words = self._words
 
     def Run( self ) :
-        print 'Listening on port', self._args.port
+        logging.info( 'Listening on port {}'.format(self._args.port) )
         server = HTTPServer(('localhost', self._args.port), Handler)
-        print 'Starting server, use <Ctrl-C> to stop'
+        logging.info( 'Starting server, use <Ctrl-C> to stop' )
         server.serve_forever()
 
     def Main( self ) :
         self._ParseCmdLine( )
+        logging.basicConfig( level=logging.INFO, format='[%(levelname)s] %(message)s' )
         self.ReadDict( )
         self.Run( )
 
