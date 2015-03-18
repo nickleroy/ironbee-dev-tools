@@ -37,6 +37,8 @@ class Main( IbServerMain ) :
         "AtsEtcInRoot"    : "${EtcIn}/trafficserver",
         "AtsEtcIn"        : "${AtsEtcInRoot}/working/${AtsVersion}",
         "AtsEtc"          : "${Etc}/trafficserver",
+        "AtsLibExec"      : "${AtsRoot}/libexec/trafficserver",
+        "AtsTargetHost"   : "${FullHostname}",
         "ServerEtcIn"     : "${AtsEtcIn}",
         "ServerEtc"       : "${AtsEtc}",
         "ServerGenerator" : "${AtsEtcInRoot}/ts_generator",
@@ -44,8 +46,8 @@ class Main( IbServerMain ) :
         "TestWikiHost"    : os.environ["TESTWIKI_HOST"],
         "TestWikiUrl"     : os.environ["TESTWIKI_URL"],
         "Prog"            : "${AtsRoot}/bin/traffic_server",
-        "Trace"           : 'http.*|dns.*|http_hdrs|sdk|ironbee|libloader',
-        "Args"            : [ '-K', '-T${Trace}' ],
+        "AtsTrace"        : 'http.*|dns.*|http_hdrs|sdk|ironbee|libloader',
+        "Args"            : [ '-K', '-T${AtsTrace}' ],
     }
 
     def __init__( self ) :

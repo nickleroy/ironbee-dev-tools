@@ -231,15 +231,19 @@ class IbDagNode( _BaseDagObject ) :
         self._executed  = False
         return self.IsStale, self.ModTime
 
-    def Execute( self, recipe=None, verbose=0, *args, **kwargs ) :
+    def Execute( self, recipe=None, debug=0, debug_fp=sys.stdout, *args, **kwargs ) :
         if not self.Enabled or self._executed :
+            if debug > 2 :
+                if not self.Enabled :
+                    print >>debug_fp, 'Not executing disabled node "{}" of DAG "{}"' \
+                        .format(self.Name, self.Dag.Name)
+                elif self._executed :
+                    print >>debug_fp, 'Not executing executed node "{}" of DAG "{}"' \
+                        .format(self.Name, self.Dag.Name)
             return
-        if verbose > 1 :
-            print 'Attempting execution of node "{}" of DAG "{}"'.format(self.Name, self.Dag.Name)
-        for node in self._children :
-            node.Execute( recipe, verbose=verbose, *args, **kwargs )
-        if not self.IsStale  or  ( self.Path is None and self.Recipe is None ):
-            return
+
+        for child in self._children :
+            child.Execute( self, debug=debug, debug_fp=debug_fp, *args, **kwargs )
 
         _recipe = None
         if self.Recipe is not None :
@@ -252,11 +256,11 @@ class IbDagNode( _BaseDagObject ) :
             raise IbDagNoRecipe( self.Name )
 
         assert callable(_recipe), (_recipe, type(_recipe))
-        if verbose > 1 :
-            print 'Executing node "{}" of DAG "{}"'.format(self.Name, self.Dag.Name)
+        if debug > 1 :
+            print >>debug_fp, 'Executing node "{}" of DAG "{}"'.format(self.Name, self.Dag.Name)
         status,text = _recipe( self, *args, **kwargs )
-        if verbose > 1 or status != 0 or text is not None :
-            print 'Node "{}" status {} "{}"'.format(self.Name, status, text)
+        if debug > 1 or status != 0 or text is not None :
+            print >>debug_fp, 'Node "{}" status {} "{}"'.format(self.Name, status, text)
         self._executed = True
         if status :
             if text is None :
@@ -269,23 +273,23 @@ class IbDagNode( _BaseDagObject ) :
                      str(self.Evaluated) )
         return s
 
-    def Print( self ) :
+    def Print( self, debug_fp=sys.stdout ) :
         print self
         if len(self.Children) :
-            print "  Children:"
-            print "    ", [ node.Name for node in self.Children ]
+            print >>debug_fp, "  Children:"
+            print >>debug_fp, "    ", sorted( [node.Name for node in self.Children] )
         if len(self.Parents) :
-            print "  Parents:"
-            print "    ", [ node.Name for node in self.Parents ]
+            print >>debug_fp, "  Parents:"
+            print >>debug_fp, "    ", sorted( [node.Name for node in self.Parents] )
         if len(self.Sources) :
-            print "  Sources:"
+            print >>debug_fp, "  Sources:"
             for source in self.Sources :
                 try :
-                    print "    {:s} {:s} {:s}" \
+                    print >>debug_fp, "    {:s} {:s} {:s}" \
                         .format( source, self.GetFullPath(source),
                                  time.asctime(time.localtime(self.GetModTime(source))) )
                 except IbDagNoFile :
-                    print "    {:s} {:s}".format(source, self.GetFullPath(source) )
+                    print >>debug_fp, "    {:s} {:s}".format(source, self.GetFullPath(source) )
 
     @staticmethod
     def _CheckList( objects ) :
@@ -304,7 +308,7 @@ class IbDagNode( _BaseDagObject ) :
 class IbDag( _BaseDagObject ) :
     def __init__( self, name, rootdir=None, recipe=None,
                   targets=None, parents=None, children=None,
-                  enabled=True, execute_after_dags=None, auto_add_modules=False ) :
+                  enabled=True, auto_add_modules=False ) :
         _BaseDagObject.__init__( self, name, rootdir, recipe, parents, children, enabled )
         assert targets is None or type(targets) in (list,tuple)
         self._nodes = [ ]
@@ -313,14 +317,11 @@ class IbDag( _BaseDagObject ) :
         self._targets = set( )
         if targets is not None :
             self.AddTargets( targets )
-        self._execute_after_dags = set( )
-        if execute_after_dags is not None :
-            self.AddExecuteAfterDags( execute_after_dags )
         self._path_full_cache = { }
         self._auto_add_modules = auto_add_modules
 
-    Targets   = property( lambda self : self._targets )
-    Nodes     = property( lambda self : self._nodes )
+    Targets = property( lambda self : self._targets )
+    Nodes   = property( lambda self : self._nodes )
 
     def AddNode( self, node, is_default_target=False ) :
         assert isinstance(node, IbDagNode)
@@ -350,11 +351,6 @@ class IbDag( _BaseDagObject ) :
     def AddTargetList( self, targets ) :
         tset = self._getTargetSet( targets )
         self._targets.update( tset )
-        self._setDirty( True )
-
-    def AddExecuteAfterDags( self, dags ) :
-        assert all( [isinstance(dag, (IbDag)) for dag in dags] )
-        self._execute_after_dags.update( set(dags) )
         self._setDirty( True )
 
     def _CheckList( self, objects ) :
@@ -407,34 +403,30 @@ class IbDag( _BaseDagObject ) :
             target.Evaluate( )
         self.Evaluated = True
 
-    def Execute( self, targets=None, recipe=None, verbose=0, *args, **kwargs ) :
+    def Execute( self, targets=None, recipe=None, debug=0, debug_fp=sys.stdout, *args, **kwargs ) :
         if not self.Enabled :
             return
         assert recipe is None or callable(recipe)
 
-        if verbose :
-            print 'Executing DAG "{:s}"'.format(self.Name)
-        if not self.Evaluated  and len(self._execute_after_dags):
+        if debug :
+            print >>debug_fp, 'Executing DAG "{:s}"'.format(self.Name)
+        if not self.Evaluated :
             self.Evaluate( targets )
 
-        if len(self._execute_after_dags) :
-            if verbose :
-                print 'Executing execute-after dags of DAG "{:s}"'.format(self.Name)
-            for dag in tuple(self._execute_after_dags) :
-                dag.Execute( targets, recipe, verbose, *args, **kwargs )
-
         if len(self._children) :
-            if verbose and len(self._children):
-                print 'Executing child DAGs of DAG "{:s}"'.format(self.Name)
+            if debug and len(self._children):
+                print >>debug_fp, 'Executing child DAGs of DAG "{:s}"'.format(self.Name)
             for dag in tuple(self._children) :
-                dag.Execute( targets, recipe, verbose, *args, **kwargs )
+                dag.Execute( targets, recipe, debug, debug_fp, *args, **kwargs )
 
         targets = self._getTargetSet( targets, True )
         if len(targets) :
-            if verbose > 1:
-                print 'Executing targets of DAG "{:s}"'.format(self.Name)
+            if debug > 1:
+                print >>debug_fp, 'Executing targets of DAG "{:s}"'.format(self.Name)
             for target in tuple(targets) :
-                target.Execute( recipe, verbose, *args, **kwargs )
+                target.Execute( recipe, debug, debug_fp, *args, **kwargs )
+        if debug :
+            print >>debug_fp, 'DAG "{:s}" excution done'.format(self.Name)
 
 
 class IbModule_util_dag( object ) :

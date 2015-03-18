@@ -16,68 +16,73 @@
 # limitations under the License.
 # ****************************************************************************
 from ib.util.dag import *
+import collections
 
 class IbServerDags( object ) :
-    def __init__( self, main ) :
-        self._dags = { main.Name : main }
-        self._maindag = main
+    def __init__( self ) :
+        self._dags = collections.OrderedDict()
 
-    def _CreateDag( self, name, parent, *args, **kwargs ) :
-        dag = IbDag( name, parents=[parent], *args, **kwargs )
+    def _AddDag( self, name, *args, **kwargs ) :
+        dag = IbDag( name, *args, **kwargs )
         self._dags[name] = dag
         return dag
 
-    def _WipeDone( self, node ) :
-        for dag in self._dags.values( ) :
-            if self._maindag in dag.Parents :
-                dag.Enabled = (dag != node.Dag)
-        return 0, None
-
-    def _SetupWipe( self, after ) :
-        dag = self._CreateDag( 'Wipe', self._maindag, enabled=True, execute_after_dags=after )
-        self.PopulateWipeIronbee( self._CreateDag('WipeIronBee', dag) )
-        self.PopulateWipeServer( self._CreateDag('WipeServer', dag) )
-        wipe_node = IbDagNode( dag, 'WipeDone', recipe=self._WipeDone, always=True )
+    def _CreateDag( self, name, parent, *args, **kwargs ) :
+        dag = IbDag( name, parents=[parent], *args, **kwargs )
         return dag
 
-    def _SetupPre( self, after ) :
-        dag = self._CreateDag( 'Pre', self._maindag, enabled=False, execute_after_dags=after )
+    def _SetupWipe( self, dag ) :
+        self.PopulateWipeIronbee( self._CreateDag('WipeIronBee', dag) )
+        self.PopulateWipeServer( self._CreateDag('WipeServer', dag) )
+        return dag
+
+    def _SetupPre( self, dag ) :
         self.PopulatePreIronbee( self._CreateDag('PreIronBee', dag) )
         self.PopulatePreServer( self._CreateDag('PreServer', dag) )
         return dag
 
-    def _SetupMain( self, after ) :
-        dag = self._CreateDag( 'Main', self._maindag, enabled=False, execute_after_dags=after )
+    def _SetupMain( self, dag ) :
         self.PopulateMainIronbee( self._CreateDag('MainIronBee', dag) )
         self.PopulateMainServer( self._CreateDag('MainServer', dag) )
         return dag
 
-    def _SetupPost( self, after ) :
-        dag = self._CreateDag( 'Post', self._maindag, enabled=False, execute_after_dags=after )
+    def _SetupPost( self, dag ) :
         self.PopulatePostIronbee( self._CreateDag('PostIronBee', dag) )
         self.PopulatePostServer( self._CreateDag('PostServer', dag) )
         return dag
 
     def SetupDags( self ) :
-        dag = self._SetupWipe( None )
-        dag = self._SetupPre( [dag] )
-        dag = self._SetupMain( [dag] )
-        dag = self._SetupPost( [dag] )
+        self._SetupWipe( self._AddDag('Wipe', enabled=True) )
+        self._SetupPre( self._AddDag('Pre', enabled=True) )
+        self._SetupMain( self._AddDag('Main', enabled=True) )
+        self._SetupPost( self._AddDag('Post', enabled=True) )
 
     def GetDag( self, name ) :
         return self._dags.get(name)
 
     def Evaluate( self, *args, **kwargs ) :
-        self._maindag.Evaluate( *args, **kwargs )
+        for dag in self._dags.values() :
+            dag.Evaluate( *args, **kwargs )
 
     def Execute( self, *args, **kwargs ) :
-        self._maindag.Execute( *args, **kwargs )
+        for dag in self._dags.values() :
+            dag.Execute( *args, **kwargs )
 
-    def Dump( self, verbose=0 ) :
+    def Dump( self, debug=0, debug_fp=sys.stdout ) :
         for name,dag in self._dags.items() :
-            print "DAG", name
-            if len(dag.Nodes) : print "Nodes:", [node.Name for node in dag.Nodes]
-            if len(dag.Targets) : print "Targets:", [target.Name for target in dag.Targets]
+            print >>debug_fp, 'DAG', name
+            print >>debug_fp, '  Parents:', sorted( [p.Name for p in dag._parents] )
+            print >>debug_fp, '  Children:', sorted( [c.Name for c in dag._children] )
+            if len(dag.Nodes) :
+                print >>debug_fp, '  Nodes:', sorted( [node.Name for node in dag.Nodes] )
+            for node in dag.Nodes :
+                print >>debug_fp, '    Node {}: parents={} children={}'.format(
+                    node.Name,
+                    sorted( [p.Name for p in node.Parents] ),
+                    sorted( [c.Name for c in node.Children] )
+                )
+            if len(dag.Targets) :
+                print >>debug_fp, '  Targets:', sorted( [target.Name for target in dag.Targets] )
 
 
 

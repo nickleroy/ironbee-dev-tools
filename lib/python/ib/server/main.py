@@ -259,12 +259,19 @@ class _ServerParser( IbBaseParser ) :
                             action="store_false", dest="auto_add_modules",
                             help="Disable --auto-add-modules" )
 
+        group = self.Parser.add_argument_group( )
+        group.add_argument( "--dag-debug",
+                            dest="dag_debug", type=int, default=0,
+                            help="Specify DAG debug level" )
+        group.add_argument( "--dag-debug-file",
+                            dest="dag_debug_file", type=argparse.FileType('w'), default=sys.stdout,
+                            help="Specify DAG debug file" )
+
 
 class _ServerDags( IbServerDags ) :
     def __init__( self, main ):
         self._main = main
-        root = IbDag('Root', auto_add_modules=self._main._args.auto_add_modules)
-        IbServerDags.__init__( self, root )
+        IbServerDags.__init__( self )
 
     def PopulateWipeIronbee( self, dag ) :
         IbDagNode( dag, 'wipe-Ironbee',
@@ -497,6 +504,7 @@ class IbServerMain( object ) :
         if self._args.execute  and  os.path.isdir( path ) :
             shutil.rmtree( path )
         if self._args.execute :
+            print 'Creating {:s} configuration in "{:s}"'.format(pretty, path)
             os.makedirs( path )
         return 0, None
 
@@ -788,7 +796,6 @@ class IbServerMain( object ) :
     def Main( self ) :
         self._parser = _ServerParser( self )
         self._Parse( )
-        print self._args.tool
         self._PostParse( )
         self._PreMain( )
         self._DumpTable( )
@@ -798,9 +805,14 @@ class IbServerMain( object ) :
             print >>self._args.logfile, '-- Starting {} @ {} --'.format(os.getpid(), time.asctime())
             print >>self._args.logfile, '  {}'.format(sys.argv)
         self._dags.Evaluate( )
-        if self._args.verbose :
-            self._dags.Dump( verbose=self._args.verbose - 1 )
-        self._dags.Execute( verbose=self._args.verbose )
+        if self._args.dag_debug :
+            print >>self._args.dag_debug_file, '---- DAG debug Start -----'
+            self._dags.Dump( debug=self._args.dag_debug-1, debug_fp=self._args.dag_debug_file )
+        self._dags.Execute( debug=self._args.dag_debug, debug_fp=self._args.dag_debug_file )
+        if self._args.dag_debug :
+            #s = raw_input( 'OK / Failed? ' )
+            s = ''
+            print >>self._args.dag_debug_file, '---- DAG debug {} End -----'.format(s)
 
 
 class IbModule_server_main( object ) :
