@@ -20,7 +20,6 @@ import os
 import sys
 import argparse
 
-
 class IbBaseParser( object ) :
     class MultAction(argparse.Action) :
         @classmethod
@@ -46,10 +45,17 @@ class IbBaseParser( object ) :
 
     class SizeAction(MultAction) :
         def __init__( self, *args, **kwargs ) :
-            self._InitClass( { 'k':1024, 'K':1000,
+            self._InitClass( { 'b': 1, 'B':1,
+                               'k':1024, 'K':1000,
                                'm':1024*1024, 'M':1000*1000,
                                'g':1024*1024*1024, 'G':1000*1000*1000, } )
             argparse.Action.__init__( self, *args, **kwargs )
+
+    def MakeSizeAction( self, dest, _type=int ) :
+        class _SizeAction( self.SizeAction ) :
+            def SetValue( self, parser, namespace, option_string, value ) :
+                namespace.__setattr__( dest, _type(value) )
+        return _SizeAction
 
     class TimeAction(MultAction) :
         def __init__( self, *args, **kwargs ) :
@@ -58,6 +64,27 @@ class IbBaseParser( object ) :
                                'M':30*24*60*60, 'y':365.24*24*60*60, } )
             argparse.Action.__init__( self, *args, **kwargs )
 
+    def MakeTimeAction( self, dest, _type=float ) :
+        class _TimeAction( self.TimeAction ) :
+            def SetValue( self, parser, namespace, option_string, value ) :
+                namespace.__setattr__( dest, _type(value) )
+        return _TimeAction
+
+    class UrlAction(argparse.Action):
+        import httplib
+        import urllib2
+        def __call__(self, parser, namespace, param, option_string=None):
+            try:
+                self.urllib2.urlopen(param)
+                self.SetValue( parser, namespace, option_string, param )
+            except self.httplib.InvalidURL as e:
+                parser.error( 'Invalid URL "{:s}": {}'.format(param, e) )
+
+    def MakeUrlAction( self, dest ) :
+        class _UrlAction( self.UrlAction ) :
+            def SetValue( self, parser, namespace, option_string, value ) :
+                namespace.__setattr__( dest, value )
+        return _UrlAction
 
     """
     Set up a basic parser for IronBee Python scripts.
@@ -100,6 +127,7 @@ class IbModule_util_parser( object ) :
 if __name__ == "__main__" :
     parser = IbBaseParser("Test")
     args = parser.Parse( )
+    print var
     print vars(args)
 
 ### Local Variables: ***
