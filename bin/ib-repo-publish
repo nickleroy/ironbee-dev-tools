@@ -34,6 +34,10 @@ Examples:
    ib-repo-publish /var/www/html/repo/dev03/ /var/tmp/nleroy/waf-sensor-1.1.x-16/
 '''
  )
+        self.Parser.add_argument( '--force', '-f', action='store_true', dest='force',
+                                  help='Force updating repo metadata (default = False)' )
+        self.Parser.add_argument( '--no-force', action='store_false', dest='force',
+                                  help='Disable force' )
 
         self.Parser.add_argument( dest='destroot', help='Destination root' )
         self.Parser.add_argument( dest='files', default=[], nargs='+',
@@ -99,7 +103,7 @@ class Main( object ) :
                 published[repo] += self._Publish( root, repo, f )
 
         for repo,count in published.items() :
-            if count :
+            if count or self._args.force :
                 self._Update( root, repo )
 
     def Main( self ) :
