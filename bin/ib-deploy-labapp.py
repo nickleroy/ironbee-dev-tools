@@ -446,22 +446,23 @@ class Main( object ) :
             DevLabInfo(
                 'dev01',
                 '9FCB72FB-FF78-498B-8E19-6ADC0180EC29',
-                sensors={ 1:113 }
+                sensors={ 1:113 },
             ),
             DevLabInfo(
                 'dev02',
-                'DD38B5F8-90A5-4858-9D7F-7C726AA13AD4'
+                'DD38B5F8-90A5-4858-9D7F-7C726AA13AD4',
+                sensors={ 1:165 },
             ),
             DevLabInfo(
                 'dev03',
                 '38CC7D16-0980-47B7-A19F-1B210F242B5A',
                 sensors={ 1:118, 2:119, 3:120, 4:125 },
-                viphost=2
+                viphost=2,
             ),
             DevLabInfo(
                 'qa',
                 'F9804CB8-BBA5-4089-B0AB-2E4B054746B4',
-                sensors={ 1:161, 2:162 }
+                sensors={ 1:161, 2:162 },
             ),
         )
         self._labs = dict( )
