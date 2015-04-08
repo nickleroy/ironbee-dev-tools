@@ -234,7 +234,6 @@ class DevLab( NamedHost ) :
         assert ( name is None  and  num is not None ) or ( name is not None  and  num is None )
         if name is None :
             name = self._getName( num )
-        print self._sensors.keys()
         return self._sensors[name]
 
     ClusterId    = property( lambda self : self._labinfo.ClusterId )
@@ -451,7 +450,7 @@ class Main( object ) :
             DevLabInfo(
                 'dev02',
                 'DD38B5F8-90A5-4858-9D7F-7C726AA13AD4',
-                sensors={ 1:165 },
+                sensors={ 1:116, 2:165 },
             ),
             DevLabInfo(
                 'dev03',
