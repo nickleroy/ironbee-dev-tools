@@ -455,7 +455,7 @@ class Main( object ) :
             DevLabInfo(
                 'dev03',
                 '38CC7D16-0980-47B7-A19F-1B210F242B5A',
-                sensors={ 1:118, 2:119, 3:120, 4:125 },
+                sensors={ 1:118, 2:119, 3:120, 4:121 },
                 viphost=2,
             ),
             DevLabInfo(
@@ -532,7 +532,8 @@ class Main( object ) :
         if self._args.execute :
             subprocess.call( cmd )
         if not self._args.quiet :
-            print 'Finished @ {}'.format(time.asctime())
+            print 'Finished deploying to {} ({}) @ {}' \
+                .format(sensor.Name, sensor.IpAddr, time.asctime())
 
 main = Main( )
 main.Main( )
