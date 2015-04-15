@@ -96,13 +96,11 @@ class Network( object ) :
 class BaseHost( object ) :
     _ip_re = re.compile( r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}' )
 
-    def __init__( self, name, domain=None, network=None, ip=None, fqdn=None ) :
+    def __init__( self, name, domain, network=None, ip=None, fqdn=None ) :
         self._checkIp( ip )
         if not( network is None  or  isinstance(network, Network) ) :
             raise InvalidNetwork( str(network) )
-        if domain is None  and  network is not None :
-            domain = network.Domain
-        if domain is None  or  not isinstance(domain, Domain) :
+        if domain is not None  and  not isinstance(domain, Domain) :
             raise InvalidDomain( str(domain) )
         self._name = name
         self._domain = domain
@@ -112,14 +110,15 @@ class BaseHost( object ) :
 
     @classmethod
     def _IpNoneOk( cls ) :
-        return True
+        return False
 
     @classmethod
     def _checkIp( cls, ip ) :
-        if cls._IpNoneOk() is False  and  ip is None :
-            raise InvalidIp( str(ip) )
-        if not ( (ip is None)  or
-                 (type(ip) is int  and  0 < ip < 255)  or
+        if ip is None :
+            if not cls._IpNoneOk() :
+                raise InvalidIp( str(ip) )
+            return
+        if not ( (type(ip) is int  and  0 < ip < 255)  or
                  (type(ip) is str  and  cls._ip_re.match(ip)) ) :
             raise InvalidIp( str(ip) )
 
@@ -143,15 +142,14 @@ class BaseHost( object ) :
 
 
 class NamedHost( BaseHost ) :
-    def __init__( self, name, domain=None, network=None, ip=None, fqdn=None ) :
+    def __init__( self, name, domain, network=None, ip=None, fqdn=None ) :
         BaseHost.__init__( self, name, domain, network, ip, fqdn )
-
-    @classmethod
-    def _IpNoneOk( cls ) :
-        return True
 
 
 class Host( BaseHost ) :
+    def __init__( self, name, domain, network=None, ip=None, fqdn=None ) :
+        BaseHost.__init__( self, name, domain, network, ip, fqdn )
+
     @classmethod
     def _IpNoneOk( cls ) :
         return True
@@ -164,34 +162,109 @@ class Sensor( BaseHost ) :
     Lab = property( lambda self : self._lab )
 
 
-class DevLabInfo( object ) :
-    def __init__( self, name, clusterid, sensors=None, viphost=None ) :
+class BaseLabInfo( object ) :
+    def __init__( self, name, domain, hosts=None ) :
         assert type(name) == str
-        assert sensors is None  or type(sensors) == dict
         self._name = name
-        self._clusterid = uuid.UUID( clusterid )
-        assert viphost is None or type(viphost) in (int,str)
-        self._viphost = viphost
-        self._sensors = {} if sensors is None else sensors
+        self._domain = domain
+        self._hosts = {} if hosts is None else hosts
 
-    def _getSensors( self ) :
-        for num,ip in self._sensors.items() :
+    def CreateLab( self, main, network ) :
+        return BaseLab( main, self, network, domain=self._domain )
+
+    @classmethod
+    def _IpNoneOk( cls ) :
+        return True
+
+    def _getHosts( self ) :
+        for num,ip in self._hosts.items() :
             yield num,ip
 
-    Name         = property( lambda self : self._name )
+    Name     = property( lambda self : self._name )
+    NumHosts = property( lambda self : len(self._hosts) )
+    Hosts    = property( _getHosts )
+
+
+class DevLabInfo( BaseLabInfo ) :
+    def __init__( self, name, domain, clusterid=None, sensors=None, viphost=None ) :
+        subdomain = Domain( name, parent=domain )
+        BaseLabInfo.__init__( self, name, subdomain, hosts=sensors )
+        if clusterid is None :
+            self._clusterid = None
+        else : 
+            self._clusterid = uuid.UUID( clusterid )
+        assert viphost is None or type(viphost) in (int,str)
+        self._viphost = viphost
+
+    def GetHostName( self, prefix, num ) :
+        return '{}-appliance{:02d}'.format(prefix, num)
+
+    def CreateLab( self, main, network ) :
+        return DevLab( main, self, network, domain=self._domain )
+
     ClusterId    = property( lambda self : self._clusterid )
     ClusterIdStr = property( lambda self : str(self._clusterid) )
     VipHost      = property( lambda self : self._viphost )
-    Sensors      = property( _getSensors )
+    NumSensors   = property( lambda self : self.NumHosts)
+    Sensors      = property( BaseLabInfo._getHosts )
 
-class DevLab( NamedHost ) :
-    def __init__( self, labinfo, network, prefix=None,
-                  domain=None, fqdn=None, viphost=None, port=8080, vipurl=None ) :
+
+class TargetLabInfo( BaseLabInfo ) :
+    def GetHostName( self, prefix, num ) :
+        return '{}-target{:02d}'.format(prefix, num)
+
+
+class ZapLabInfo( BaseLabInfo ) :
+    def GetHostName( self, prefix, num ) :
+        return '{}-zap{:02d}'.format(prefix, num)
+
+
+class BaseLab( NamedHost ) :
+    def __init__( self, main, labinfo, network, domain=None, fqdn=None ) :
         NamedHost.__init__( self, labinfo.Name, domain=domain, network=network, fqdn=fqdn )
+        self._main = main
         self._labinfo = labinfo
-        self.Prefix = prefix
+        self._hosts = { }
+
+    @classmethod
+    def _IpNoneOk( cls ) :
+        return True
+
+    LabInfo = property( lambda self : self._labinfo )
+    Network = property( lambda self : self._network )
+    Hosts   = property( lambda self : self._hosts.values() )
+
+    def AddHostsFromLabInfo( self ) :
+        self.AddHosts( self.LabInfo.Hosts )
+
+    def AddHosts( self, hosts ) :
+        for num,ip in hosts :
+            self.AddHost( num, ip )
+
+    def AddHost( self, num, ip, name=None ) :
+        assert ( name is None  and  num is not None ) or ( name is not None  and  num is None )
+        if name is None :
+            name = self.LabInfo.GetHostName( self._main.Prefix, num )
+        self._hosts[name] = self._CreateHost( name, ip )
+
+    def GetHost( self, name=None, num=None ) :
+        assert ( name is None  and  num is not None ) or ( name is not None  and  num is None )
+        if name is None :
+            name = self.LabInfo.GetHostName( self._main.Prefix, num )
+        try :
+            return self._hosts[name]
+        except KeyError :
+            return None
+
+    def _CreateHost( self, name, ip ) :
+        return Host( name, self.Domain, self.Network, ip )
+
+
+class DevLab( BaseLab ) :
+    def __init__( self, main, labinfo, network,
+                  domain=None, fqdn=None, viphost=None, port=8080, vipurl=None ) :
+        BaseLab.__init__( self, main, labinfo, network, domain=domain, fqdn=fqdn )
         self.SetVip( viphost, port, vipurl )
-        self._sensors = { }
 
     def SetVip( self, viphost=None, port=8080, vipurl=None ) :
         if viphost is None :
@@ -210,42 +283,16 @@ class DevLab( NamedHost ) :
             vipurl = 'http://{}:{}/'.format(nsvip, port)
         self._vipurl = vipurl
 
-    def _setPrefix( self, prefix ) :
-        self._prefix = prefix
-
-    def _getName( self, num ) :
-        assert self._prefix is not None
-        return '{}-appliance{:02d}'.format(self._prefix, num)
-
-    def AddLabinfoSensors( self ) :
-        self.AddSensors( self.LabInfo.Sensors )
-
-    def AddSensors( self, sensors ) :
-        for num,ip in sensors :
-            self.AddSensor( num, ip )
-
-    def AddSensor( self, num, ip, name=None ) :
-        assert ( name is None  and  num is not None ) or ( name is not None  and  num is None )
-        if name is None :
-            name = self._getName( num )
-        self._sensors[name] = Sensor( name, self, ip, self.Domain )
-
-    def GetSensor( self, name=None, num=None ) :
-        assert ( name is None  and  num is not None ) or ( name is not None  and  num is None )
-        if name is None :
-            name = self._getName( num )
-        return self._sensors[name]
+    def _CreateHost( self, name, ip ) :
+        return Sensor( name, self, ip, self.Domain )
 
     ClusterId    = property( lambda self : self._labinfo.ClusterId )
     ClusterIdStr = property( lambda self : self._labinfo.ClusterIdStr )
-    LabInfo      = property( lambda self : self._labinfo )
-    Prefix       = property( lambda self : self._prefix, _setPrefix )
-    Network      = property( lambda self : self._network )
     VipUrl       = property( lambda self : self._vipurl )
     ServiceUrl   = property( lambda self : self._vipurl )
     UiHost       = property( lambda self : self._name )
     Port         = property( lambda self : self._port )
-    Sensors      = property( lambda self : self._sensors.values() )
+    Sensors      = property( lambda self : self.Hosts )
 
 
 class Appliance( object ) :
@@ -274,7 +321,7 @@ class Appliance( object ) :
 
     def _SetPropSuffix( self, prop_suffix ) :
         if prop_suffix is None :
-            if self.Rev >= IbVersion('1.1') :
+            if self.Rev >= IbVersion('1.2') :
                 prop_suffix = 'Qualys_WAF_{}'.format( self.Name )
             else :
                 prop_suffix = 'Qualys_WAF'
@@ -300,13 +347,16 @@ class VMWareHost( NamedHost ) :
     VmNetwork = property( lambda self : self._vmnetwork )
     Datastore = property( lambda self : self._datastore )
 
-    def Upload( self, user, passwd, sensor, appliance, sslpass=None, force=False ) :
+    @classmethod
+    def _IpNoneOk( cls ) :
+        return True
+
+    def UploadCommand( self, user, passwd, host, lab, appliance, sslpass=None, force=False ) :
         assert isinstance(appliance, Appliance)
         if sslpass is None :
             sslpass = 'GARBAGE'
         upload_url = 'vi://{}:{}@vcenter01.{}:443/WAF-MSN/host/{}/'. \
                      format(user, passwd, self.Domain.Name, self.FQDN )
-        lab = sensor.Lab
         if appliance.Rev >= IbVersion('1.1') :
             prop_ID = 'WAF_CLUSTER_ID'
             prop_URL = 'WAF_SERVICE_URL'
@@ -318,16 +368,21 @@ class VMWareHost( NamedHost ) :
             cmd += [ '--overwrite', '--powerOffTarget', ]
         cmd += [
             '--powerOn',
-            '--name={}'.format(sensor.FQDN),
+            '--name={}'.format(host.FQDN),
             '--network={}'.format(self.VmNetwork),
             '--datastore={}'.format(self.Datastore),
-            '--prop:{}={}'.format(prop_ID, lab.ClusterIdStr),
-            '--prop:{}={}'.format(prop_URL, lab.ServiceUrl),
-            '--prop:WAF_SSL_PASSPHRASE={}'.format(sslpass),
-            '--prop:vami.ip0.{}={}'.format(appliance.PropSuffix, sensor.IpAddr),
-            '--prop:vami.gateway.{}={}'.format(appliance.PropSuffix, lab.Network.Gateway),
-            '--prop:vami.netmask0.{}={}'.format(appliance.PropSuffix, lab.Network.NetMask),
-            '--prop:vami.DNS.{}={}'.format(appliance.PropSuffix, lab.Network.NameServerIps),
+            ]
+        if isinstance(lab, DevLab) :
+            cmd += [
+                '--prop:{}={}'.format(prop_ID, lab.ClusterIdStr),
+                '--prop:{}={}'.format(prop_URL, lab.ServiceUrl),
+                '--prop:WAF_SSL_PASSPHRASE={}'.format(sslpass),
+                '--prop:vami.ip0.{}={}'.format(appliance.PropSuffix, host.IpAddr),
+                '--prop:vami.gateway.{}={}'.format(appliance.PropSuffix, lab.Network.Gateway),
+                '--prop:vami.netmask0.{}={}'.format(appliance.PropSuffix, lab.Network.NetMask),
+                '--prop:vami.DNS.{}={}'.format(appliance.PropSuffix, lab.Network.NameServerIps),
+                ]
+        cmd += [
             appliance.Url,
             upload_url,
         ]
@@ -344,6 +399,7 @@ Examples:
    ib-deploy-labapp.py list
    ib-deploy-labapp.py -v deploy esxi06 dev03 1 next
    ib-deploy-labapp.py deploy esxi06 dev03 1 file:Qualys-WAF-Dev-Appliance_OVF10.ova -f
+   ib-deploy-labapp.py deploy vmwaf-vm NONE 0 file:openSUSE_13.1_qualysZAP64.x86_64-0.2.4.ovf
 '''
         )
 
@@ -402,9 +458,11 @@ Examples:
         p.add_argument( 'which', action=ApplianceAction,
                         help='Specify which appliance ({})'.format(','.join(self._appliance_names)) )
         p.add_argument( 'ip', nargs='?', help='IP Address of VM' )
+        p.add_argument( 'hostname', nargs='?', help='Host Name of VM' )
 
         p.add_argument( '--viphost', action='store', dest='viphost', help='Override VIP host' )
-        p.add_argument( '--force', '-f', action='store_true', dest='force', help='Force (default = False)' )
+        p.add_argument( '--force', '-f',
+                        action='store_true', dest='force', help='Force (default = False)' )
         p.add_argument( '--no-force', action='store_false', dest='force', help='Disable force' )
         p.add_argument( '--ova-name',
                         action='store', dest='ova_name', default=None,
@@ -421,10 +479,10 @@ class Main( object ) :
 
     def _InitAppliances( self ) :
         self._appliances = {
-            'daily' : Appliance( 'DailyBuild', rev=IbVersion('1.1') ),
-            'next'  : Appliance( 'NextRelease', rev=IbVersion('1.1') ),
-            'dev'   : Appliance( 'Dev', rev=IbVersion('1.0') ),
-            'prod'  : Appliance( 'Prod', rev=IbVersion('1.0') ),
+            'daily' : Appliance( 'DailyBuild', rev=IbVersion('1.2') ),
+            'next'  : Appliance( 'NextRelease', rev=IbVersion('1.2') ),
+            'dev'   : Appliance( 'Dev', rev=IbVersion('1.1') ),
+            'prod'  : Appliance( 'Prod', rev=IbVersion('1.1') ),
         }
 
     def _InitNet( self ) :
@@ -434,8 +492,8 @@ class Main( object ) :
             129 : Network( self._msn, '10.112.129' ),
         }
         nservers = (
-            NamedHost( 'ns1', network=self._nets[128], ip=121 ),
-            NamedHost( 'ns2', network=self._nets[128], ip=122 ),
+            NamedHost( 'ns1', domain=self._msn, network=self._nets[128], ip=121 ),
+            NamedHost( 'ns2', domain=self._msn, network=self._nets[128], ip=122 ),
         )
         self._nets[128].AddNameServers( nservers )
         self._nets[129].AddNameServers( nservers )
@@ -444,38 +502,54 @@ class Main( object ) :
         labinfo = (
             DevLabInfo(
                 'dev01',
+                self._msn,
                 '9FCB72FB-FF78-498B-8E19-6ADC0180EC29',
                 sensors={ 1:113 },
             ),
             DevLabInfo(
                 'dev02',
+                self._msn,
                 'DD38B5F8-90A5-4858-9D7F-7C726AA13AD4',
                 sensors={ 1:116, 2:165 },
             ),
             DevLabInfo(
                 'dev03',
+                self._msn,
                 '38CC7D16-0980-47B7-A19F-1B210F242B5A',
                 sensors={ 1:118, 2:119, 3:120, 4:121 },
                 viphost=2,
             ),
             DevLabInfo(
                 'qa',
+                self._msn,
                 'F9804CB8-BBA5-4089-B0AB-2E4B054746B4',
                 sensors={ 1:161, 2:162 },
+            ),
+            ZapLabInfo(
+                'ZAP',
+                self._msn,
+                hosts={ 1:135, 2:136, 3:160, 4:166 },
+            ),
+            TargetLabInfo(
+                'Targets',
+                self._msn,
+                hosts={ 1:135, 2:136, 3:160, 4:166 },
             ),
         )
         self._labs = dict( )
         for labinfo in labinfo :
-            domain = Domain( labinfo.Name, parent=self._msn )
-            self._labs[labinfo.Name] = DevLab( labinfo, self._nets[129], domain=domain )
+            self._labs[labinfo.Name] = labinfo.CreateLab( self, self._nets[129] )
 
     def _InitEsxiHosts( self ) :
-        names = ['esxi{:02d}'.format(n) for n in range(1, 10)] + ['waf-vm', 'bitter']
+        names = ['esxi{:02d}'.format(n) for n in range(1, 10)] + ['bitter']
         self._esxi_hosts = dict( [(name,VMWareHost(name, self._msn)) for name in names] )
+        self._esxi_hosts['waf-vm'] = VMWareHost('waf-vm', self._msn, datastore='datastore1 (1)')
 
     EsxiNames   = property( lambda self : self._esxi_hosts.keys() )
     ApplNames   = property( lambda self : self._appliances.keys() )
+    Prefix      = property( lambda self : self._args.prefix )
     LabNames    = property( lambda self : self._labs.keys() )
+    Description = property( lambda self : 'Deploy appliance' )
 
     def _Parse( self ) :
         self._args = self._parser.Parse()
@@ -488,8 +562,6 @@ class Main( object ) :
            not os.path.isfile(self._args.appliance_name) :
             self._parser.Error( 'Appliance file "{}" does not exist'.format(self._args.appliance_name) )
 
-    Description = property( lambda self : 'Deploy appliance' )
-
     def _PostParse( self ) :
         if self._args.command != "list"  and  self._args.execute  and  self._args.passwd is None :
             self._args.passwd = getpass.getpass( 'Enter password for user {}: '.format(self._args.user) )
@@ -497,8 +569,9 @@ class Main( object ) :
         # Finish setting up lab things with command line values
         for lab in self._labs.values() :
             lab.Prefix = self._args.prefix
-            lab.AddLabinfoSensors( )
-            lab.SetVip( viphost=self._args.viphost )
+            lab.AddHostsFromLabInfo( )
+            if isinstance( lab, DevLab ) :
+                lab.SetVip( viphost=self._args.viphost )
 
     def Main( self ) :
         self._Parse( )
@@ -509,31 +582,44 @@ class Main( object ) :
             print '  Appliances:', ' '.join( self._appliances.keys() )
             print '  Labs:', ' '.join( self._labs.keys() )
             for key,lab in self._labs.items() :
-                print '    {} sensors: {}'.format( key, ' '.join([s.Name for s in lab.Sensors]) )
+                if len(lab.Hosts) :
+                    print '    {} hosts: {}'.format( key, ' '.join([s.Name for s in lab.Hosts]) )
             sys.exit( 0 )
 
         lab = self._labs[self._args.lab]
         vmhost = self._esxi_hosts[self._args.vmhost]
-        sensor = lab.GetSensor( num=self._args.appliance_num )
+        host = lab.GetHost( num=self._args.appliance_num )
         appliance = self._appliances.get(
             self._args.appliance_name,
             Appliance('File', rev=IbVersion('1.0'), local_file=self._args.appliance_name)
         )
-        cmd = vmhost.Upload( self._args.user,
-                             self._args.passwd,
-                             sensor,
-                             appliance,
-                             force=self._args.force )
-        if self._args.verbose >= 2 and not self._args.execute :
-            print 'Not executing command:'
-            print ' \\\n  '.join(cmd)
+        cmd = vmhost.UploadCommand( self._args.user,
+                                    self._args.passwd,
+                                    host,
+                                    lab,
+                                    appliance,
+                                    force=self._args.force )
+
+        clean = vmhost.UploadCommand( self._args.user,
+                                      'XXXXXX',
+                                      host,
+                                      lab,
+                                      appliance,
+                                      force=self._args.force )
+        if not self._args.execute :
+            if self._args.verbose >= 2 :
+                print 'Not executing:', '\n"'+'"\n  "'.join(clean)+'"'
+            else :
+                print 'Not executing:', clean
+        elif self._args.verbose >= 2 :
+            print 'Executing:', '\n"'+'"\n  "'.join(clean)+'"'
         elif self._args.verbose :
-            print 'Executing:', cmd
+            print 'Executing:', clean
         if self._args.execute :
             subprocess.call( cmd )
         if not self._args.quiet :
             print 'Finished deploying to {} ({}) @ {}' \
-                .format(sensor.Name, sensor.IpAddr, time.asctime())
+                .format(host.Name, host.IpAddr, time.asctime())
 
 main = Main( )
 main.Main( )
