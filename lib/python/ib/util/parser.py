@@ -90,6 +90,8 @@ class IbBaseParser( object ) :
     Set up a basic parser for IronBee Python scripts.
     """
     def __init__( self, description, *args, **kwargs ) :
+        if 'epilog' in kwargs  and  'formatter_class' not in kwargs :
+            kwargs['formatter_class'] = argparse.RawDescriptionHelpFormatter
         parser = argparse.ArgumentParser( description=description,
                                           prog=os.path.basename(sys.argv[0]),
                                           *args, **kwargs)
