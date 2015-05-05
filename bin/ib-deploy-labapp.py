@@ -578,12 +578,16 @@ class Main( object ) :
         self._PostParse( )
         if self._args.command == 'list' :
             print 'List of known items:'
-            print '  ESXI Hosts:', ' '.join( [host.Name for host in self._esxi_hosts.values()] )
-            print '  Appliances:', ' '.join( self._appliances.keys() )
-            print '  Labs:', ' '.join( self._labs.keys() )
-            for key,lab in self._labs.items() :
+            names = sorted([host.Name for host in self._esxi_hosts.values()])
+            print '  ESXI Hosts:', ' '.join(names)
+            names = sorted(self._appliances.keys())
+            print '  Appliances:', ' '.join(names)
+            names = sorted(self._labs.keys())
+            print '  Labs:', ' '.join(names)
+            for key,lab in sorted(self._labs.items(), key=lambda t: t[0].lower()) :
                 if len(lab.Hosts) :
-                    print '    {} hosts: {}'.format( key, ' '.join([s.Name for s in lab.Hosts]) )
+                    print '    {} hosts: {}'. \
+                        format( key, ' '.join(sorted([s.Name for s in lab.Hosts])) )
             sys.exit( 0 )
 
         lab = self._labs[self._args.lab]
