@@ -77,6 +77,9 @@ class IbServerSiteOptions( object ) :
             if site not in self._sites :
                 raise IbServerUnknownSite(site)
             self._defs['Sites'][site] = True
+            tmp = site+'Site'
+            if tmp not in self._site_options :
+                self._site_options[tmp] = {}
             for name in self._sites[site] :
                 if name in self._sites :
                     self.SetSites([name])

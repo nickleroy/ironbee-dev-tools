@@ -100,20 +100,20 @@ class _ServerParser( IbBaseParser ) :
         group = self.Parser.add_argument_group( )
         class IbAction(argparse.Action):
             def __call__(self, parser, namespace, values, option_string=None):
-                if option_string == "--ib-config" :
+                generators = main.Generators()
+                print generators
+                v = values[0]
+                if '/' in v or os.path.isdir(v) :
                     namespace.defs['IbEtcIn'] = None
-                    namespace.defs['IbConfig'] = values[0]
-                elif len(values) == 0 :
-                    namespace.defs['IbEtcIn'] = main.Defs.Lookup("RnsEtcIn")
-                    namespace.defs['IbGenerator'] = main.Defs.Lookup("RnsGenerator")
+                    namespace.defs['IbGenerator'] = v
+                elif v in generators :
+                    namespace.defs['IbGenerator'] = generators[v]
                 else :
-                    namespace.defs['IbEtcIn'] = values[0]
-        group.add_argument( "--rns", action=IbAction, nargs=0,
-                            help="Use the RNS IronBee etc")
+                    parser.error( 'Unknown generator name "{}"'.format(v) )
+        group.add_argument( "--ib-config", '-C', action=IbAction, nargs=1,
+                            help="Specify ironbee configuration" )
         group.add_argument( "--ib-etc", action="store", dest="ironbee_etc", nargs=1,
                             help="Specify ironbee etc source directory" )
-        group.add_argument( "--ib-config", action=IbAction, nargs=1,
-                            help="Specify ironbee configuration" )
         
         def LogLevels( levels ) :
             count = len(levels)
@@ -357,6 +357,11 @@ class IbServerMain( object ) :
             'libexec' : _sys_get('SYS_LIBEXEC', str, 'libexec' if len(glob.glob('/usr/libexec/*')) else 'lib' )
         }
 
+    @staticmethod
+    def Generators( ) :
+        ibconfigs = os.environ.get('IB_GENERATORS', 'ib:${IbMainGenerator}')
+        return dict([c.split(':',1) for c in ibconfigs.split(',')])
+
     @classmethod
     def _InitGlobalDefs( cls ) :
         cls._global_defs = {
@@ -379,9 +384,9 @@ class IbServerMain( object ) :
             "IbEtc"            : "${Etc}/ironbee",
             "IbEtcIn"          : "${EtcIn}/ironbee",
             "IbEnable"         : True,
-            "IbGenerator"      : "${IbEtcIn}/ib_generator.py",
+            "IbMainGenerator"  : os.environ.get('IB_GENERATOR', "${IbEtcIn}/ib_generator.py"),
             "IbConfigFile"     : "${ServerNameShort}.conf",
-            "IbConfig"         : "${IbEtc}/${IbConfigFile}",
+            "IbGenerators"     : IbServerMain.Generators(),
             "IbVersion"        : None,
             "TxLogDir"         : "${IbLogDir}/txlogs",
             "RnsEtc"           : "${Etc}/rns-ironbee",
@@ -544,6 +549,7 @@ class IbServerMain( object ) :
                 pypath = None
             else :
                 pypath = [path]+os.environ['PYTHONPATH'].split(':')
+            print pypath
             fp, modpath, descr = imp.find_module( filename, pypath )
             mod = imp.load_module( filename, fp, modpath, descr )
             try :

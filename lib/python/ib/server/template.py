@@ -73,7 +73,6 @@ class IbServerTemplate( object ) :
         for key, value in generator.SiteOptions.items( ) :
             self._MergeIn( tvars, 'Opts.'+key, value )
         for key, value in generator.LocalOptions.items( ) :
-            print key, value
             self._MergeIn( tvars, 'Opts.'+key, value )
         for key, value in self._engine.Defs.KeyValues( ) :
             if '.' in key :
