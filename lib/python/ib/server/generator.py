@@ -163,10 +163,15 @@ class IbServerBaseGenerator( IbServerSiteOptions ) :
             if os.path.isdir( fpath ) :
                 if not recurse :
                     continue
+                children = [dirnode]
+                if 'children' in kwargs :
+                    kwargs = kwargs.copy()
+                    children += kwargs['children']
+                    del kwargs['children']
                 node = self.AddDir( dag,
                                     os.path.join(dirname, name),
                                     recurse=True,
-                                    children=[dirnode],
+                                    children=children,
                                     filt=filt,
                                     file_node_fn=file_node_fn,
                                     *args, **kwargs)

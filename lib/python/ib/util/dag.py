@@ -19,6 +19,7 @@ import re
 import os
 import sys
 import time
+import random
 
 class IbDagBaseException( BaseException ) : pass
 class IbDagNoFile( IbDagBaseException ) : pass
@@ -291,6 +292,10 @@ class IbDagNode( _BaseDagObject ) :
                 except IbDagNoFile :
                     print >>debug_fp, "    {:s} {:s}".format(source, self.GetFullPath(source) )
 
+    def ForceSetName( self, name ) :
+        assert name.startswith( self._name )
+        self._name = name
+
     @staticmethod
     def _CheckList( objects ) :
         assert all( [isinstance(node, IbDagNode) for node in objects] )
@@ -323,11 +328,34 @@ class IbDag( _BaseDagObject ) :
     Targets = property( lambda self : self._targets )
     Nodes   = property( lambda self : self._nodes )
 
+    _randchars = None
+    @classmethod
+    def _randchar( cls ) :
+        if cls._randchars is None :
+            tmp = []
+            tmp += [chr(i+ord('a')) for i in range(26)]
+            tmp += [chr(i+ord('A')) for i in range(26)]
+            tmp += [chr(i+ord('0')) for i in range(10)]
+            tmp += ['_']
+            cls._randchars = tuple(tmp)
+            print cls._randchars
+        return random.choice( cls._randchars )
+
+    def _randname( self, name ) :
+        while True :
+            tmp = ''.join( [self._randchar() for i in range(6)])
+            newname = name + tmp
+            if newname not in self._names :
+                return newname
+
     def AddNode( self, node, is_default_target=False ) :
         assert isinstance(node, IbDagNode)
+        if node.Name in self._names :
+            old = node.Name
+            node.ForceSetName( self._randname(node.Name) )
+            print >>sys.stderr, 'Duplicate node name "{}", renamed to ""'.format(old, node.Name)
         try :
             assert node not in self._nodes, 'Duplicate node found "{}"'.format(node.name)
-            assert node.Name not in self._names, 'Duplicate node name "{}"'.format(node.Name)
         except AssertionError :
             print "Nodes:", [node.Name for node in self._nodes]
             print "Names:", self._names.keys()

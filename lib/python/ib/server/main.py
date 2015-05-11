@@ -101,7 +101,6 @@ class _ServerParser( IbBaseParser ) :
         class IbAction(argparse.Action):
             def __call__(self, parser, namespace, values, option_string=None):
                 generators = main.Generators()
-                print generators
                 v = values[0]
                 if '/' in v or os.path.isdir(v) :
                     namespace.defs['IbEtcIn'] = None
