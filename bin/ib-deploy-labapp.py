@@ -612,11 +612,11 @@ class Main( object ) :
                                       force=self._args.force )
         if not self._args.execute :
             if self._args.verbose >= 2 :
-                print 'Not executing:', '\n"'+'"\n  "'.join(clean)+'"'
+                print 'Not executing:', '\\\n"'+'"\\\n  "'.join(clean)+'"'
             else :
                 print 'Not executing:', clean
         elif self._args.verbose >= 2 :
-            print 'Executing:', '\n"'+'"\n  "'.join(clean)+'"'
+            print 'Executing:', '\\\n"'+'"\\\n  "'.join(clean)+'"'
         elif self._args.verbose :
             print 'Executing:', clean
         if self._args.execute :
