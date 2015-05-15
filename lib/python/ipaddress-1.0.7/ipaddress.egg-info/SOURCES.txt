@@ -1,0 +1,7 @@
+README.txt
+ipaddress.py
+setup.py
+ipaddress.egg-info/PKG-INFO
+ipaddress.egg-info/SOURCES.txt
+ipaddress.egg-info/dependency_links.txt
+ipaddress.egg-info/top_level.txt
