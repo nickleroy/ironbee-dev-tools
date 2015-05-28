@@ -385,6 +385,7 @@ class IbServerMain( object ) :
             "IbEnable"         : True,
             "IbMainGenerator"  : os.environ.get('IB_GENERATOR', "${IbEtcIn}/ib_generator.py"),
             "IbConfigFile"     : "${ServerNameShort}.conf",
+            "IbConfigFull"     : "${IbEtc}/${IbConfigFile}",
             "IbGenerators"     : IbServerMain.Generators(),
             "IbVersion"        : None,
             "TxLogDir"         : "${IbLogDir}/txlogs",
