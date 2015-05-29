@@ -69,14 +69,14 @@ class IbServerSiteOptions( object ) :
                 raise IbServerUnknownOption(opt)
 
     def SetSites( self, sites ) :
-        if self._sites is None :
-            return
         if 'Sites' not in self._defs :
             self._defs['Sites'] = { }
-        for site in sites :
+        if self._sites is None :
+            return
+        for site,enabled in sites.items() :
             if site not in self._sites :
                 raise IbServerUnknownSite(site)
-            self._defs['Sites'][site] = True
+            self._defs['Sites'][site] = enabled
             tmp = site+'Site'
             if tmp not in self._site_options :
                 self._site_options[tmp] = {}

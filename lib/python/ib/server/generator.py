@@ -33,6 +33,10 @@ class IbServerBaseGenerator( IbServerSiteOptions ) :
     SourceRoot     = property( lambda self : self._engine.SourceRoot )
     DestRoot       = property( lambda self : self._engine.DestRoot )
 
+    @classmethod
+    def SiteNames( cls ) :
+        return []
+
     def PopulatePreDag( self, dag, root, main, srcdir, destdir ) :
         pass
 

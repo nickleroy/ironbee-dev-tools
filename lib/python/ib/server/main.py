@@ -589,7 +589,10 @@ class IbServerMain( object ) :
     def _LoadGenerator( self, name, sites, flags ) :
         try :
             generator = self._Generator( name )
-            generator.Generator.Setup( self.IronBeeVersion, sites, flags )
+            allsites = { }
+            for name in generator.Generator.SiteNames() :
+                allsites[name] = name in sites
+            generator.Generator.Setup( self.IronBeeVersion, allsites, flags )
         except IbServerNoGenerator as e :
             print >>sys.stderr, ( 'No generator "{:s}"'.format(name) )
         except IbServerInvalidGenerator as e :
