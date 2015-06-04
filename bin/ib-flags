@@ -150,8 +150,10 @@ class Main( object ) :
         flag_set = self._flagset[self._args.which]
         base = os.environ['IB_ROOT']
         flag_set.ReadFile( base )
+        if not self._args.all :
+            print "{:30s} 0x{:012x} {:048b}".format( "Value", self._args.value, self._args.value )
         for flag in flag_set.GetFlags( self._args.value, allbits=self._args.all ) :
-            print "{:30s} 0x{:012x}".format( flag.Name, flag.Value )
+            print "{:30s} 0x{:012x} {:048b}".format( flag.Name, flag.Value, flag.Value )
 
     def Main( self ) :
         self.Setup( )
