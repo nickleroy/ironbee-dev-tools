@@ -19,12 +19,13 @@ import re
 import os
 import time
 
-def SubProcFormatCmd( cmd, mult_lines=False, spaces=2 ) :
+def SubProcFormatCmd( cmd, cwd=None, mult_lines=False, spaces=2 ) :
+    fdir = '' if cwd is None else ' in "{}"'.format(cwd)
     if mult_lines :
         joiner = "'\n"+' '*spaces+"'"
-        return "\n'"+joiner.join(cmd)+"'"
+        return "\n'"+joiner.join(cmd)+"'"+'\n'+' '*spaces+fdir
     else :
-        return "'"+"' '".join(cmd)+"'"
+        return "'"+"' '".join(cmd)+"'"+' '+fdir
 
 
 ### Local Variables: ***
