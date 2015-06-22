@@ -83,7 +83,7 @@ class _ServerParser( IbBaseParser ) :
                                   help="Specify core file or \"-\" for last" )
 
         group = self.Parser.add_argument_group( )
-        group.add_argument( '--tool', default='none', dest='tool', choices=main.Tools.keys(),
+        group.add_argument( '--tool', '-t', default='none', dest='tool', choices=main.Tools.keys(),
                             help="Run {:1} under specified tool".format(main.ServerName) )
         self.Parser.set_defaults( tool_args=[] )
         class ToolArgsAction(argparse.Action):
