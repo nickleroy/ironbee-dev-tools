@@ -1,0 +1,210 @@
+#! /usr/bin/env python
+# ****************************************************************************
+# Licensed to Qualys, Inc. (QUALYS) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# QUALYS licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ****************************************************************************
+import re
+import os
+import sys
+import pwd
+import grp
+import glob
+import subprocess
+import argparse
+import time
+import shutil
+import tarfile
+import stat
+import git
+
+from ib.util.subproc     import *
+from ib.build.exceptions import *
+from ib.build.archive    import *
+from ib.build.config     import *
+from ib.build.parser     import *
+from ib.build.specs      import *
+
+
+class _Parser( IbBuildSpecParser ) :
+    def __init__( self ) :
+        IbBuildSpecParser.__init__( self, "Program to install an IronBee build archive" )
+
+        self.Parser.add_argument( '--no-extract',
+                                  dest="extract", default=True, action="store_false",
+                                  help="Don't extract archives" )
+        self.Parser.add_argument( '--no-store',
+                                  dest="store", default=True, action="store_false",
+                                  help="Don't update local archives.txt" )
+
+
+class _Main( object ) :
+    def __init__( self ) :
+        self._parser = _Parser( )
+
+    def _ParseCmdLine( self ) :
+        self._args = self._parser.Parse( )
+
+    def _ReadConfig( self ) :
+        config = IbBuildConfig( self._args.config )
+        self._config = config.Read( )
+
+    def _MergeConfig( self ) :
+        self._specs = IbBuildSpecs( self._args.verbose )
+        self._specs.MergeArgs( self._config['install']['defaults'], self._args )
+
+    def _WipeDirs( self, dirpath, dirs ) :
+        assert type(dirpath) == str
+        assert type(dirs) in (list, tuple, set)
+        for name in dirs :
+            fullpath = os.path.join( dirpath, name )
+            if os.path.exists( fullpath ) :
+                for root, ldirs, lfiles in os.walk( fullpath ) :
+                    for f in lfiles :
+                        fp = os.path.join(root,f)
+                        if os.path.islink( fp ) :
+                            pass
+                        elif not os.access( fp, os.W_OK ) :
+                            os.chmod( fp, stat.S_IRUSR | stat.S_IWUSR )
+                    for f in ldirs :
+                        fp = os.path.join(root,f)
+                        if os.path.islink( fp ) :
+                            pass
+                        elif not os.access( fp, os.W_OK ) :
+                            os.chmod( fp, stat.S_IRWXU )
+                shutil.rmtree( fullpath )
+
+    def _PopulateDirectory( self, archive, name, wipe=False ) :
+        tball = archive.GetArchive( name )
+        if not os.path.exists( tball.DestDir ) :
+            os.makedirs( tball.DestDir )
+            user.ChownDir( tball.DestDir )
+        tarball = os.path.join( archive.ArchiveDirectory, tball.FileName )
+        if not os.path.isfile( tarball ) :
+            print >>sys.stderr, "Archive", tarball, "doesn not exist"
+            sys.exit(1)
+        try :
+            if self.Execute :
+                print "Populating", tball.DestDir, "from", tarball
+            else :
+                print "Not populating", tball.DestDir, "from", tarball
+                return
+            regex = re.compile( r'(\.?/)?([^\/]+)/' )
+            tar = tarfile.open( tarball )
+            top = set()
+            for member in tar.getmembers() :
+                if member.name.startswith("/") :
+                    print >>sys.stderr, \
+                        'Archive', fullpath, 'has fully qualified path! "%s"' % (member.name)
+                    sys.exit(1)
+                m = regex.match( member.name )
+                if m is not None :
+                    top.add( m.group(2) )
+            if wipe is None or wipe == False :
+                pass
+            elif wipe == True :
+                self._WipeDirs( tball.DestDir, top )
+            elif type(wipe) in (list, tuple) :
+                self._WipeDirs( tball.DestDir, wipe )
+            else :
+                assert False, str(wipe)
+            tar.extractall( path=tball.DestDir )
+            if os.geteuid() == 0 :
+                user.ChownDir( tball.DestDir )
+        except tarfile.TarError as e :
+            print >>sys.stderr, 'Error extracting from tarball "%s": %s' % ( tarball, e )
+            sys.exit(1)
+
+    def _ExtractTarballs( self, archive ) :
+        self._PopulateDirectory( archive, "local",  wipe=('opt', 'share', 'etc') )
+        etc = os.environ['QLYS_ETC']
+        if self.Execute :
+            if os.path.exists( etc ) :
+                shutil.rmtree( etc )
+            os.makedirs( etc )
+            if self._args.store :
+                archive.WriteArchiveData( etc )
+
+    def _SelectArchive( self ) :
+        vms = IbBuildArchiveSet( self._args.archives )
+        vms.ReadAll( )
+        archive = None
+        for a in vms.Archives( self._specs.ArchiveFilter ) :
+            if archive is None :
+                archive = a
+            elif a.IronBeeVersion > archive.IronBeeVersion :
+                archive = a
+            elif a.TimeStamp > archive.TimeStamp :
+                archive = a
+        if archive is not None :
+            if not self.Quiet :
+                print "Selected", archive.Name
+            if self.Verbose :
+                archive.PrintSummary( )
+        return archive
+
+    def _RunGit( self, cmd, cwd ) :
+        cmd = ['git'] + list(cmd)
+        if not self._args.execute :
+            print "Not executing:", SubProcFormatCmd( cmd, cwd )
+        elif self._args.verbose :
+            print "Executing:", SubProcFormatCmd( cmd, cwd )
+            subprocess.call( cmd, cwd=cwd )
+
+    def _CheckoutEtcIn( self, archive ) :
+        local = archive.QualysLocal
+        etcin = os.path.join( local, 'etc.in' )
+        gitdir = os.path.join( etcin, '.git' )
+        branch = archive.EtcInGitBranch if self._args.etc_branch is None else self._args.etc_branch
+        if not os.path.isdir( gitdir ) :
+            if os.path.exists( etcin ) :
+                shutil.rmtree( etcin )
+            return self._RunGit( 'clone', archive.EtcInGitRepo, '-b', branch, local )
+        else :
+            repo = git.Repo( etcin )
+            if repo.active_branch.name == branch :
+                self._RunGit( ['pull'], etcin )
+            elif branch in repo.branches :
+                self._RunGit( ['checkout', branch], etcin )
+                self._RunGit( ['pull'], etcin )
+            else :
+                self._RunGit( ['checkout', '-b', branch, 'origin/'+branch], etcin )
+
+    Execute = property( lambda self : self._args.execute )
+    Verbose = property( lambda self : self._args.verbose )
+    Quiet   = property( lambda self : self._args.quiet )
+
+    def Main( self ) :
+        self._ParseCmdLine( )
+        self._ReadConfig( )
+        self._MergeConfig( )
+        if not self.Quiet :
+            print self._specs
+        archive = self._SelectArchive( )
+        if archive is None :
+            print >>sys.stderr, "No matching archives found!"
+            sys.exit( 1 )
+        if self._args.extract :
+            self._ExtractTarballs( archive )
+
+
+main = _Main( )
+main.Main( )
+
+### Local Variables: ***
+### py-indent-offset:4 ***
+### python-indent:4 ***
+### python-continuation-offset:4 ***
+### tab-width:4  ***
+### End: ***
