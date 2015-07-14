@@ -113,7 +113,7 @@ class _ServerParser( IbBaseParser ) :
                             help="Specify ironbee configuration" )
         group.add_argument( "--ib-etc", action="store", dest="ironbee_etc", nargs=1,
                             help="Specify ironbee etc source directory" )
-        
+
         def LogLevels( levels ) :
             count = len(levels)
             lower = [ l.lower() for l in levels ]
@@ -648,6 +648,10 @@ class IbServerMain( object ) :
 
         self._defs["UserName"] = os.environ['USER']
         self._GetIbVersion( )
+
+        # Default IronBee generator is 'ib'
+        if self._defs.Lookup( 'IbGenerator' ) is None :
+            self._defs['IbGenerator'] = IbServerMain.Generators()['ib']
 
         # Create the IronBee and server generators, set their mode
         self._LoadGenerator( 'IbGenerator', self._args.sites, self._args.ib_options )

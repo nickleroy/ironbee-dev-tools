@@ -82,7 +82,7 @@ class IbServerSiteOptions( object ) :
                 self._site_options[tmp] = {}
             for name in self._sites[site] :
                 if name in self._sites :
-                    self.SetSites([name])
+                    self.SetSites( {name : self._sites[site]} )
                 elif type(name) in (list,tuple) :
                     self.SetOptions( name, True )
                 else :
